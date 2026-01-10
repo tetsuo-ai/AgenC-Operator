@@ -4,7 +4,8 @@
 
 A cyberpunk themed voice controlled desktop operator for the [AgenC Solana protocol](https://github.com/tetsuo-ai/AgenC). Built with Tauri v2 (Rust + React/TypeScript), featuring immersive neon aesthetics, a swappable 2D/3D holographic avatar, and natural voice commands powered by Grok Voice API.
 
-<img width="1853" height="661" alt="Screenshot 2026-01-09 225751" src="https://github.com/user-attachments/assets/b0ac0b9e-08a2-4caf-93cc-48e5687313ea" />
+
+![6a8e96fc-39aa-4913-bb2e-b4c7f0147531](https://github.com/user-attachments/assets/2227543b-c7f3-423a-ada6-823038f72ff0)
 
 
 ## Features
