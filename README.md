@@ -121,14 +121,9 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-# Grok Voice API (get from https://console.x.ai/)
 VITE_XAI_API_KEY=your_xai_api_key_here
-
-# Solana RPC
 VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
 VITE_SOLANA_NETWORK=devnet
-
-# Keypair path
 SOLANA_KEYPAIR_PATH=~/.config/solana/id.json
 ```
 
