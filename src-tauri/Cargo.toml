@@ -1,0 +1,41 @@
+[package]
+name = "agenc-operator"
+version.workspace = true
+edition.workspace = true
+description = "Tetsuo - Cyberpunk AgenC Solana Operator"
+
+[lib]
+name = "agenc_operator_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { workspace = true, features = [] }
+
+[dependencies]
+# Core operator logic
+operator-core = { path = "../crates/operator-core" }
+
+# Tauri v2
+tauri = { workspace = true, features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

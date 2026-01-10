@@ -1,0 +1,64 @@
+# ============================================================================
+# TETSUO - AgenC Operator .gitignore
+# ============================================================================
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Rust
+Cargo.lock
+*.rs.bk
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+id.json
+keypair.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Tauri
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/icons/*.ico
+src-tauri/icons/*.icns
+
+# Whisper models (large files)
+models/
+*.bin
+*.ggml
+
+# Test & Coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.local
+*.bak
+tmp/
+temp/

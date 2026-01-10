@@ -1,0 +1,43 @@
+[package]
+name = "operator-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+
+# Solana
+solana-sdk = { workspace = true }
+solana-client = { workspace = true }
+
+# Audio (local voice processing)
+cpal = { workspace = true }
+rodio = { workspace = true }
+
+# Local Whisper ASR for offline fallback
+whisper-rs = { workspace = true }
+
+# WebSocket for external voice API
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Base58 encoding for Solana addresses
+bs58 = "0.5"
+
+# Secure random for keypair generation
+rand = "0.8"

@@ -1,0 +1,53 @@
+# ============================================================================
+# TETSUO - AgenC Operator Workspace
+# Cyberpunk voice-controlled Solana operator for the AgenC protocol
+# ============================================================================
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/operator-core",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["AgenC Team"]
+license = "MIT"
+repository = "https://github.com/agenc/agenc-operator"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# Solana SDK for transaction building/signing
+solana-sdk = "2.0"
+solana-client = "2.0"
+
+# Audio processing
+cpal = "0.15"
+rodio = "0.19"
+
+# Whisper for local ASR (offline fallback)
+whisper-rs = "0.11"
+
+# WebSocket for Grok API streaming
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Tauri
+tauri = { version = "2.0", features = ["tray-icon"] }
+tauri-build = "2.0"

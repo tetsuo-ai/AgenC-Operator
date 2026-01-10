@@ -1,0 +1,404 @@
+/**
+ * ============================================================================
+ * TETSUO - Global Cyberpunk Styles
+ * ============================================================================
+ * Heavy neon aesthetics, glitch effects, scanlines, and holographic vibes.
+ * ============================================================================
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   Base Styles
+   ============================================================================ */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'JetBrains Mono', monospace;
+    color: #e0e0ff;
+    background: #0a0a0f;
+    /* Prevent text selection for UI elements */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    overflow: hidden;
+    /* Cyberpunk background image */
+    background-image: url('/bg-cyberpunk.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+
+  /* Dark overlay for better UI readability */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 15, 0.7);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Make root fill viewport */
+  #root {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Text selection for editable areas */
+  input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
+/* ============================================================================
+   Component Layer - Reusable Cyberpunk Components
+   ============================================================================ */
+
+@layer components {
+  /* Neon text glow effect */
+  .neon-text {
+    text-shadow:
+      0 0 5px currentColor,
+      0 0 10px currentColor,
+      0 0 20px currentColor,
+      0 0 40px currentColor;
+  }
+
+  .neon-text-subtle {
+    text-shadow:
+      0 0 2px currentColor,
+      0 0 5px currentColor;
+  }
+
+  /* Cyber panel - glass morphism with neon border */
+  .cyber-panel {
+    background: linear-gradient(
+      135deg,
+      rgba(10, 10, 15, 0.9) 0%,
+      rgba(18, 18, 26, 0.8) 100%
+    );
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 255, 255, 0.2);
+    border-radius: 4px;
+    box-shadow:
+      0 0 10px rgba(0, 255, 255, 0.1),
+      inset 0 0 30px rgba(0, 255, 255, 0.02);
+  }
+
+  .cyber-panel-magenta {
+    border-color: rgba(255, 0, 255, 0.3);
+    box-shadow:
+      0 0 10px rgba(255, 0, 255, 0.1),
+      inset 0 0 30px rgba(255, 0, 255, 0.02);
+  }
+
+  /* Cyber button */
+  .cyber-btn {
+    @apply px-4 py-2 font-mono text-sm uppercase tracking-wider;
+    background: linear-gradient(
+      180deg,
+      rgba(0, 255, 255, 0.1) 0%,
+      rgba(0, 255, 255, 0.05) 100%
+    );
+    border: 1px solid rgba(0, 255, 255, 0.5);
+    color: #00ffff;
+    transition: all 0.2s ease;
+    clip-path: polygon(
+      0 0,
+      calc(100% - 8px) 0,
+      100% 8px,
+      100% 100%,
+      8px 100%,
+      0 calc(100% - 8px)
+    );
+  }
+
+  .cyber-btn:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(0, 255, 255, 0.2) 0%,
+      rgba(0, 255, 255, 0.1) 100%
+    );
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+    text-shadow: 0 0 10px #00ffff;
+  }
+
+  .cyber-btn:active {
+    transform: scale(0.98);
+  }
+
+  .cyber-btn-magenta {
+    border-color: rgba(255, 0, 255, 0.5);
+    color: #ff00ff;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 0, 255, 0.1) 0%,
+      rgba(255, 0, 255, 0.05) 100%
+    );
+  }
+
+  .cyber-btn-magenta:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 0, 255, 0.2) 0%,
+      rgba(255, 0, 255, 0.1) 100%
+    );
+    box-shadow: 0 0 20px rgba(255, 0, 255, 0.3);
+    text-shadow: 0 0 10px #ff00ff;
+  }
+
+  /* Cyber input */
+  .cyber-input {
+    @apply px-3 py-2 font-mono text-sm;
+    background: rgba(10, 10, 15, 0.8);
+    border: 1px solid rgba(0, 255, 255, 0.3);
+    color: #e0e0ff;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+
+  .cyber-input:focus {
+    border-color: rgba(0, 255, 255, 0.8);
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+  }
+
+  .cyber-input::placeholder {
+    color: rgba(0, 255, 255, 0.3);
+  }
+
+  /* Scanline overlay */
+  .scanlines {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .scanlines::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.1) 2px,
+      rgba(0, 0, 0, 0.1) 4px
+    );
+    pointer-events: none;
+    animation: scanline 8s linear infinite;
+  }
+
+  /* Glitch text effect */
+  .glitch {
+    position: relative;
+  }
+
+  .glitch::before,
+  .glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.8;
+  }
+
+  .glitch::before {
+    color: #ff00ff;
+    animation: glitch-1 0.3s infinite;
+    clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
+  }
+
+  .glitch::after {
+    color: #00ffff;
+    animation: glitch-2 0.3s infinite;
+    clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
+  }
+
+  /* Voice pulse ring */
+  .voice-ring {
+    position: relative;
+  }
+
+  .voice-ring::before,
+  .voice-ring::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0;
+  }
+
+  .voice-ring.active::before {
+    animation: pulse-ring 1s ease-out infinite;
+  }
+
+  .voice-ring.active::after {
+    animation: pulse-ring 1s ease-out 0.5s infinite;
+  }
+}
+
+/* ============================================================================
+   Utility Classes
+   ============================================================================ */
+
+@layer utilities {
+  /* Grid background */
+  .bg-cyber-grid {
+    background-image:
+      linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+
+  /* Vignette effect */
+  .vignette {
+    box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.5);
+  }
+
+  /* CRT curve effect */
+  .crt-curve {
+    border-radius: 50% / 3%;
+  }
+}
+
+/* ============================================================================
+   Animations
+   ============================================================================ */
+
+@keyframes glitch-1 {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(-3px, 3px); }
+  40% { transform: translate(3px, -3px); }
+  60% { transform: translate(-3px, -3px); }
+  80% { transform: translate(3px, 3px); }
+}
+
+@keyframes glitch-2 {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(3px, -3px); }
+  40% { transform: translate(-3px, 3px); }
+  60% { transform: translate(3px, 3px); }
+  80% { transform: translate(-3px, -3px); }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes data-stream {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* ============================================================================
+   Custom Title Bar (Transparent Window)
+   ============================================================================ */
+
+.titlebar {
+  height: 32px;
+  background: linear-gradient(
+    90deg,
+    rgba(10, 10, 15, 0.95) 0%,
+    rgba(18, 18, 26, 0.95) 100%
+  );
+  border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  /* Enable window dragging */
+  -webkit-app-region: drag;
+}
+
+.titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #00ffff;
+  text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+}
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.window-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.window-btn.close {
+  background: #ff5f56;
+}
+
+.window-btn.minimize {
+  background: #ffbd2e;
+}
+
+.window-btn.maximize {
+  background: #27ca41;
+}
+
+.window-btn:hover {
+  filter: brightness(1.2);
+  box-shadow: 0 0 8px currentColor;
+}
