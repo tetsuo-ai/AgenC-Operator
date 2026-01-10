@@ -308,6 +308,19 @@ export const VoiceAPI = {
   getVoiceState(): Promise<VoiceState> {
     return invoke<VoiceState>('get_voice_state');
   },
+
+  /**
+   * Get ephemeral token for voice WebSocket connection
+   * Token expires after 5 minutes - request a new one before expiry
+   */
+  getVoiceToken(): Promise<string> {
+    return invoke<AsyncResult<string>>('get_voice_token')
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] getVoiceToken failed:', err);
+        throw new TetsuoAPIError(`Failed to get voice token: ${err}`);
+      });
+  },
 };
 
 // ============================================================================
@@ -334,6 +347,38 @@ export const ConfigAPI = {
 // Unified API Export
 // ============================================================================
 
+// ============================================================================
+// Debug Logging API (logs to terminal)
+// ============================================================================
+
+export const DebugAPI = {
+  /**
+   * Log a message to the Rust backend terminal
+   */
+  log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void {
+    invoke('frontend_log', { level, message }).catch(() => {
+      // Fallback to console if IPC fails
+      console.log(`[${level}] ${message}`);
+    });
+  },
+
+  debug(message: string): void {
+    this.log('debug', message);
+  },
+
+  info(message: string): void {
+    this.log('info', message);
+  },
+
+  warn(message: string): void {
+    this.log('warn', message);
+  },
+
+  error(message: string): void {
+    this.log('error', message);
+  },
+};
+
 export const TetsuoAPI = {
   wallet: WalletAPI,
   intent: IntentAPI,
@@ -341,6 +386,7 @@ export const TetsuoAPI = {
   policy: PolicyAPI,
   voice: VoiceAPI,
   config: ConfigAPI,
+  debug: DebugAPI,
 };
 
 export default TetsuoAPI;

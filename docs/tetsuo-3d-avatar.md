@@ -83,13 +83,21 @@ The avatar reacts to existing voice state (`status.mode`).
 
 ```ts
 const CONFIG = {
-  ACCENT_TINT_STRENGTH: 0.3,
-  EMISSIVE_BASE_INTENSITY: 0.6,
-  EMISSIVE_VOICE_BOOST: 0.8,
-  HEAD_SWAY_AMPLITUDE: 0.02,
-  HEAD_SWAY_SPEED: 3.0,
-  SCALE_BREATH_AMPLITUDE: 0.008,
-  EYE_PULSE_SPEED: 4.0,
+  // Appearance
+  ACCENT_TINT_STRENGTH: 0.3,      // How much accent color affects non-matched materials
+  EMISSIVE_BASE_INTENSITY: 0.6,   // Base eye glow intensity
+  EMISSIVE_VOICE_BOOST: 0.8,      // Additional intensity when speaking
+
+  // Voice Reactivity
+  HEAD_SWAY_AMPLITUDE: 0.02,      // Radians of head rotation when speaking
+  HEAD_SWAY_SPEED: 3.0,           // Speed of head sway oscillation
+  SCALE_BREATH_AMPLITUDE: 0.008,  // Scale variation (subtle breathing)
+  SCALE_BREATH_SPEED: 2.0,        // Breathing speed
+  EYE_PULSE_SPEED: 4.0,           // Eye glow pulse speed when speaking
+
+  // Idle Animation
+  IDLE_SWAY_AMPLITUDE: 0.005,     // Very subtle idle movement
+  IDLE_SWAY_SPEED: 0.5,           // Slow idle oscillation
 };
 ```
 

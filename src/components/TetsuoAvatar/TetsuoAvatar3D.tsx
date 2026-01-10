@@ -26,6 +26,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import type { AgentAppearance, AgentStatus } from "../../types";
+import { useMouthAnimation } from "../../hooks/useMouthAnimation";
 
 const MODEL_PATH = "/models/avatar.glb";
 
@@ -245,6 +246,14 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
+  const mouthInitializedRef = useRef(false);
+
+  // Mouth animation hook
+  // Set forceTest to 0.9 to verify rig works, then set back to -1
+  const mouthAnimation = useMouthAnimation({
+    debug: true,
+    forceTest: -1, // Change to 0.9 to test if mouth opens
+  });
 
   // Clone scene once to avoid mutating the cached original
   const clonedScene = useMemo(() => {
@@ -265,6 +274,14 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
 
     return center.multiplyScalar(-1);
   }, [clonedScene]);
+
+  // Initialize mouth animation after scene is ready
+  useEffect(() => {
+    if (!mouthInitializedRef.current && clonedScene) {
+      mouthAnimation.initialize(clonedScene);
+      mouthInitializedRef.current = true;
+    }
+  }, [clonedScene, mouthAnimation]);
 
   // Apply appearance whenever it changes
   useEffect(() => {
@@ -303,6 +320,9 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
         timeRef.current
       );
     }
+
+    // Apply mouth animation driven by audio amplitude
+    mouthAnimation.applyMouthAnimation();
   });
 
   return (

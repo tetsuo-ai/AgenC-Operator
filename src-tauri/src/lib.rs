@@ -355,6 +355,109 @@ async fn get_voice_state(state: State<'_, AppState>) -> Result<VoiceState, Strin
 }
 
 // ============================================================================
+// Tauri Commands - Voice Token (Ephemeral Token for WebSocket)
+// ============================================================================
+
+/// Response from x.ai client_secrets endpoint
+/// Supports both nested format: { "client_secret": { "value": "...", "expires_at": ... } }
+/// and flat format: { "value": "...", "expires_at": ... }
+#[derive(Debug, Deserialize)]
+struct ClientSecretResponse {
+    #[serde(default)]
+    client_secret: Option<ClientSecret>,
+    // Flat format fields (fallback)
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default)]
+    expires_at: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClientSecret {
+    value: String,
+    expires_at: i64,
+}
+
+impl ClientSecretResponse {
+    fn get_token(&self) -> Option<(String, i64)> {
+        // Try nested format first
+        if let Some(ref cs) = self.client_secret {
+            return Some((cs.value.clone(), cs.expires_at));
+        }
+        // Fall back to flat format
+        if let (Some(value), Some(expires)) = (&self.value, self.expires_at) {
+            return Some((value.clone(), expires));
+        }
+        None
+    }
+}
+
+/// Get ephemeral token for voice WebSocket connection
+/// This keeps the API key secure on the backend
+#[tauri::command]
+async fn get_voice_token() -> Result<AsyncResult<String>, String> {
+    info!("[IPC] get_voice_token called");
+
+    // Get API key from environment
+    let api_key = match std::env::var("VITE_XAI_API_KEY") {
+        Ok(key) if !key.is_empty() && !key.contains("your_") => key,
+        _ => {
+            error!("[IPC] VITE_XAI_API_KEY not set or invalid");
+            return Ok(AsyncResult::err(
+                "XAI API key not configured. Set VITE_XAI_API_KEY in .env"
+            ));
+        }
+    };
+
+    // Request ephemeral token from x.ai
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.x.ai/v1/realtime/client_secrets")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "expires_after": { "seconds": 300 }
+        }))
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                // Get raw response for debugging
+                let body = resp.text().await.unwrap_or_default();
+                debug!("[IPC] Token response body: {}", body);
+
+                match serde_json::from_str::<ClientSecretResponse>(&body) {
+                    Ok(data) => {
+                        if let Some((token, expires_at)) = data.get_token() {
+                            info!("[IPC] Got ephemeral token, expires at {}", expires_at);
+                            Ok(AsyncResult::ok(token))
+                        } else {
+                            error!("[IPC] Token response missing value field: {}", body);
+                            Ok(AsyncResult::err("Token response missing value field"))
+                        }
+                    }
+                    Err(e) => {
+                        error!("[IPC] Failed to parse token response: {} - body: {}", e, body);
+                        Ok(AsyncResult::err(format!("Failed to parse token: {}", e)))
+                    }
+                }
+            } else {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                error!("[IPC] Token request failed: {} - {}", status, body);
+                Ok(AsyncResult::err(format!("Token request failed ({}): {}", status, body)))
+            }
+        }
+        Err(e) => {
+            error!("[IPC] Token request error: {}", e);
+            Ok(AsyncResult::err(format!("Network error: {}", e)))
+        }
+    }
+}
+
+// ============================================================================
 // Tauri Commands - Configuration (Mixed)
 // ============================================================================
 
@@ -415,11 +518,31 @@ async fn refresh_state_background(state: State<'_, AppState>) -> Result<(), Stri
 }
 
 // ============================================================================
+// Tauri Commands - Frontend Logging (for debugging)
+// ============================================================================
+
+/// Log a message from the frontend to the terminal
+#[tauri::command]
+fn frontend_log(level: String, message: String) {
+    match level.as_str() {
+        "error" => error!("[Frontend] {}", message),
+        "warn" => info!("[Frontend] {}", message),
+        "info" => info!("[Frontend] {}", message),
+        _ => debug!("[Frontend] {}", message),
+    }
+}
+
+// ============================================================================
 // Application Setup
 // ============================================================================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load environment variables from .env file
+    if let Err(e) = dotenvy::dotenv() {
+        eprintln!("Warning: Could not load .env file: {}", e);
+    }
+
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -462,9 +585,13 @@ pub fn run() {
             // Voice state (fast in-memory)
             set_voice_state,
             get_voice_state,
+            // Voice token (ephemeral for WebSocket)
+            get_voice_token,
             // Config
             set_rpc_url,
             get_config,
+            // Debug
+            frontend_log,
         ])
         .run(tauri::generate_context!())
         .expect("Error running Tetsuo");

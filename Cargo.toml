@@ -32,8 +32,8 @@ rodio = "0.19"
 # Whisper for local ASR (offline fallback)
 whisper-rs = "0.11"
 
-# WebSocket for Grok API streaming
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+# WebSocket for Grok API streaming (using rustls for Windows compatibility)
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 
 # Serialization
@@ -47,6 +47,12 @@ thiserror = "1.0"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP client for API calls (using rustls for Windows compatibility)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Environment variable loading
+dotenvy = "0.15"
 
 # Tauri
 tauri = { version = "2.0", features = ["tray-icon"] }

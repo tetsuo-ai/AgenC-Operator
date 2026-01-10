@@ -162,11 +162,14 @@ export interface GrokResponse {
       transcript?: string;
     }>;
   };
-  delta?: {
+  // x.ai sends delta as either a string (for audio/transcript) or an object
+  delta?: string | {
     audio?: string;
     text?: string;
     transcript?: string;
   };
+  // For response.output_audio_transcript.done
+  transcript?: string;
   error?: {
     code: string;
     message: string;

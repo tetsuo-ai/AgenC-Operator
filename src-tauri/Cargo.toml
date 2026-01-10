@@ -26,6 +26,13 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+# HTTP client for API calls
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+
+
+# Environment variable loading
+dotenvy = { workspace = true }
+
 # Error handling
 anyhow = { workspace = true }
 
