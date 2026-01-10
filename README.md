@@ -2,7 +2,7 @@
 
 > *"I am Tetsuo, your cyberpunk operator for the AgenC protocol. Jacking in..."*
 
-A cyberpunk themed voice controlled desktop operator for the [AgenC Solana protocol](https://github.com/agenc). Built with Tauri v2 (Rust + React/TypeScript), featuring immersive neon aesthetics, a swappable 2D/3D holographic avatar, and natural voice commands powered by Grok Voice API.
+A cyberpunk themed voice controlled desktop operator for the [AgenC Solana protocol](https://github.com/tetsuo-ai/AgenC). Built with Tauri v2 (Rust + React/TypeScript), featuring immersive neon aesthetics, a swappable 2D/3D holographic avatar, and natural voice commands powered by Grok Voice API.
 
 ![Tetsuo Screenshot](docs/screenshot.png)
 
