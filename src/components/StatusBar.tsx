@@ -8,26 +8,19 @@
  */
 
 import { motion, AnimatePresence } from 'framer-motion';
-import type { VoiceState, WalletInfo } from '../types';
+import type { VoiceState } from '../types';
 
 interface StatusBarProps {
   voiceState: VoiceState;
   isConnected: boolean;
-  wallet: WalletInfo | null;
   error: string | null;
 }
 
 export default function StatusBar({
   voiceState,
   isConnected,
-  wallet,
   error,
 }: StatusBarProps) {
-  const truncateAddress = (addr: string): string => {
-    if (!addr || addr.length < 10) return 'Not Connected';
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
-
   return (
     <div className="h-7 bg-cyber-darker/90 border-t border-neon-cyan/10 flex items-center justify-between px-4 text-[10px] font-mono">
       {/* Left - System Status */}
@@ -71,38 +64,14 @@ export default function StatusBar({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
-            <span className="text-red-500">⚠</span>
+            <span className="text-red-500">!</span>
             <span className="truncate max-w-md">{error}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Right - Wallet & Time */}
+      {/* Right - Time */}
       <div className="flex items-center gap-4">
-        {/* Wallet Address */}
-        <div className="flex items-center gap-1.5">
-          <motion.div
-            className={`w-1.5 h-1.5 rounded-full ${
-              wallet?.is_connected ? 'bg-neon-cyan' : 'bg-holo-silver/30'
-            }`}
-            animate={{
-              opacity: wallet?.is_connected ? [1, 0.6, 1] : 0.3,
-            }}
-            transition={{ duration: 2, repeat: Infinity }}
-          />
-          <span className="text-neon-cyan/80">
-            {truncateAddress(wallet?.address || '')}
-          </span>
-        </div>
-
-        {/* Balance */}
-        {wallet?.is_connected && (
-          <div className="text-holo-silver/60">
-            {wallet.balance_sol.toFixed(4)} SOL
-          </div>
-        )}
-
-        {/* Time */}
         <Clock />
       </div>
     </div>

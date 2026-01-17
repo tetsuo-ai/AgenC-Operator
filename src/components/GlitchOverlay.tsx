@@ -113,48 +113,12 @@ export default function GlitchOverlay({
         height={256}
       />
 
-      {/* RGB Split Effect - Only when active */}
+      {/* Glitch Bars - Only when active */}
       <AnimatePresence>
         {active && (
           <>
-            {/* Red Channel Shift */}
-            <motion.div
-              className="absolute inset-0"
-              style={{
-                background: 'rgba(255, 0, 0, 0.02)',
-                mixBlendMode: 'screen',
-              }}
-              initial={{ x: 0 }}
-              animate={{
-                x: [-2 * config.glitchScale, 2 * config.glitchScale, -2 * config.glitchScale],
-              }}
-              exit={{ x: 0, opacity: 0 }}
-              transition={{
-                duration: 0.1,
-                repeat: Infinity,
-              }}
-            />
-
-            {/* Blue Channel Shift */}
-            <motion.div
-              className="absolute inset-0"
-              style={{
-                background: 'rgba(0, 0, 255, 0.02)',
-                mixBlendMode: 'screen',
-              }}
-              initial={{ x: 0 }}
-              animate={{
-                x: [2 * config.glitchScale, -2 * config.glitchScale, 2 * config.glitchScale],
-              }}
-              exit={{ x: 0, opacity: 0 }}
-              transition={{
-                duration: 0.1,
-                repeat: Infinity,
-              }}
-            />
-
             {/* Glitch Bars */}
-            {[...Array(5)].map((_, i) => (
+            {[...Array(3)].map((_, i) => (
               <motion.div
                 key={i}
                 className="absolute left-0 right-0 bg-white/5"
@@ -165,7 +129,7 @@ export default function GlitchOverlay({
                 initial={{ scaleX: 0, opacity: 0 }}
                 animate={{
                   scaleX: [0, 1, 0],
-                  opacity: [0, 0.5, 0],
+                  opacity: [0, 0.3, 0],
                   x: ['-100%', '100%'],
                 }}
                 transition={{

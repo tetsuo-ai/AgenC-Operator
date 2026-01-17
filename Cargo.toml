@@ -57,3 +57,15 @@ dotenvy = "0.15"
 # Tauri
 tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-build = "2.0"
+
+# Vector database for memory
+qdrant-client = "1.7"
+
+# UUID generation
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# SPL token for token gating
+spl-associated-token-account = "4.0"

@@ -15,11 +15,11 @@ import { TetsuoAPI } from './api';
 import TetsuoAvatar from './components/TetsuoAvatar';
 import AppearanceMenu from './components/AppearanceMenu';
 import GlitchOverlay from './components/GlitchOverlay';
-import HudPanel from './components/HudPanel';
 import ChatPanel from './components/ChatPanel';
 import TitleBar from './components/TitleBar';
 import VoiceButton from './components/VoiceButton';
 import StatusBar from './components/StatusBar';
+import WalletDropdown from './components/WalletDropdown';
 
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
@@ -248,32 +248,17 @@ function App() {
   }, [voiceState, startListening, stopListening]);
 
   // ============================================================================
-  // Manual Refresh (User-Triggered)
-  // ============================================================================
-
-  const handleManualRefresh = useCallback(() => {
-    console.log('[App] Manual refresh triggered');
-    setIsGlitching(true);
-
-    // Fire both polls
-    pollWalletNonBlocking();
-    pollProtocolStateNonBlocking();
-
-    setTimeout(() => setIsGlitching(false), 300);
-  }, [pollWalletNonBlocking, pollProtocolStateNonBlocking, setIsGlitching]);
-
-  // ============================================================================
   // Render
   // ============================================================================
 
   if (isLoading) {
     return (
-      <div className="w-full h-full bg-transparent flex items-center justify-center">
+      <div className="w-full h-full bg-black flex items-center justify-center">
         <div className="text-center">
-          <div className="text-neon-cyan text-2xl font-display animate-pulse-glow">
+          <div className="text-white text-2xl font-display animate-pulse-glow">
             INITIALIZING TETSUO
           </div>
-          <div className="mt-4 text-holo-silver text-sm font-mono">
+          <div className="mt-4 text-white/70 text-sm font-mono">
             Connecting to the net...
           </div>
         </div>
@@ -289,30 +274,17 @@ function App() {
       {/* Custom Title Bar */}
       <TitleBar />
 
+      {/* Wallet Dropdown - Top Right */}
+      <div className="absolute top-12 right-4 z-50">
+        <WalletDropdown wallet={wallet} />
+      </div>
+
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Background Grid */}
-        <div className="absolute inset-0 bg-cyber-grid opacity-50" />
+        <div className="absolute inset-0 bg-cyber-grid opacity-30" />
 
-        {/* Left Panel - Protocol HUD */}
-        <div className="w-80 p-4 flex flex-col gap-4 z-10">
-          <HudPanel
-            title="PROTOCOL STATUS"
-            color="cyan"
-            protocolState={protocolState}
-            wallet={wallet}
-          />
-
-          {/* Refresh Button */}
-          <button
-            onClick={handleManualRefresh}
-            className="cyber-btn text-xs w-full"
-          >
-            REFRESH DATA
-          </button>
-        </div>
-
-        {/* Center - Tetsuo Avatar */}
+        {/* Center - Tetsuo Avatar (Main Focus) */}
         <div className="flex-1 flex items-center justify-center relative">
           <TetsuoAvatar
             appearance={appearance}
@@ -337,7 +309,7 @@ function App() {
           />
         </div>
 
-        {/* Right Panel - Chat & Tasks */}
+        {/* Right Panel - Chat */}
         <div className="w-96 p-4 flex flex-col gap-4 z-10">
           <ChatPanel
             messages={messages}
@@ -351,7 +323,6 @@ function App() {
       <StatusBar
         voiceState={voiceState}
         isConnected={isVoiceConnected}
-        wallet={wallet}
         error={error}
       />
 

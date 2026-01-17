@@ -18,6 +18,8 @@
 import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { VoiceState } from '../types';
+import { NEON_PALETTE } from '../styles/palette';
+import { useMouthOpen2D } from '../hooks/useMouthAnimation';
 
 interface TetsuoHologramProps {
   voiceState: VoiceState;
@@ -27,6 +29,9 @@ interface TetsuoHologramProps {
 export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologramProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [particles, setParticles] = useState<Particle[]>([]);
+
+  // Get mouth open value from audio analysis
+  const mouthOpen = useMouthOpen2D({ enabled: voiceState === 'speaking' });
 
   // ============================================================================
   // Particle System
@@ -53,7 +58,7 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
         size: Math.random() * 3 + 1,
         speed: Math.random() * 2 + 0.5,
         opacity: Math.random() * 0.5 + 0.2,
-        color: Math.random() > 0.5 ? '#00ffff' : '#ff00ff',
+        color: '#ffffff',
       });
     }
     setParticles(newParticles);
@@ -73,8 +78,8 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Draw horizontal scanlines
-      ctx.strokeStyle = 'rgba(0, 255, 255, 0.03)';
+      // Draw horizontal scanlines - white
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
       ctx.lineWidth = 1;
       for (let y = 0; y < canvas.height; y += 4) {
         ctx.beginPath();
@@ -83,14 +88,14 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
         ctx.stroke();
       }
 
-      // Draw data stream lines
+      // Draw data stream lines - white
       const time = Date.now() / 1000;
       for (let i = 0; i < 5; i++) {
         const x = (i * 60 + time * 30) % canvas.width;
         const gradient = ctx.createLinearGradient(x, 0, x, canvas.height);
-        gradient.addColorStop(0, 'rgba(0, 255, 255, 0)');
-        gradient.addColorStop(0.5, 'rgba(0, 255, 255, 0.1)');
-        gradient.addColorStop(1, 'rgba(0, 255, 255, 0)');
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.1)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
         ctx.strokeStyle = gradient;
         ctx.lineWidth = 2;
@@ -107,15 +112,15 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
   }, []);
 
   // ============================================================================
-  // Voice State Colors
+  // Voice State Colors - black and white only
   // ============================================================================
 
   const stateColors = {
-    idle: { glow: '#00ffff', intensity: 0.6 },
-    listening: { glow: '#00ff80', intensity: 1 },
-    processing: { glow: '#ff00ff', intensity: 0.8 },
-    speaking: { glow: '#00ffff', intensity: 1 },
-    error: { glow: '#ff3366', intensity: 0.8 },
+    idle: { glow: '#ffffff', intensity: 0.6 },
+    listening: { glow: '#ffffff', intensity: 1 },
+    processing: { glow: '#cccccc', intensity: 0.8 },
+    speaking: { glow: '#ffffff', intensity: 1 },
+    error: { glow: '#ffffff', intensity: 0.8 },
   };
 
   const currentState = stateColors[voiceState];
@@ -218,15 +223,15 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
                     </filter>
 
                     <linearGradient id="holoGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#e0e0ff" stopOpacity="0.9" />
-                      <stop offset="50%" stopColor="#00ffff" stopOpacity="0.7" />
-                      <stop offset="100%" stopColor="#bf00ff" stopOpacity="0.5" />
+                      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+                      <stop offset="50%" stopColor="#ffffff" stopOpacity="0.7" />
+                      <stop offset="100%" stopColor="#000000" stopOpacity="0.5" />
                     </linearGradient>
 
                     <linearGradient id="hairGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                       <stop offset="0%" stopColor="#ffffff" />
-                      <stop offset="50%" stopColor="#e0e0ff" />
-                      <stop offset="100%" stopColor="#c0c0ff" />
+                      <stop offset="50%" stopColor="#cccccc" />
+                      <stop offset="100%" stopColor="#999999" />
                     </linearGradient>
                   </defs>
 
@@ -307,6 +312,31 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
                     <ellipse cx="115" cy="70" rx="12" ry="8" fill={currentState.glow} opacity={0.2} />
                   </g>
 
+                  {/* Mouth - animated by audio */}
+                  <g className="mouth">
+                    {/* Mouth shape that opens based on audio amplitude */}
+                    <ellipse
+                      cx="100"
+                      cy="95"
+                      rx={4 + mouthOpen * 4}
+                      ry={1 + mouthOpen * 6}
+                      fill={currentState.glow}
+                      filter={`url(#glow-${layer})`}
+                      opacity={0.8}
+                    />
+                    {/* Mouth glow when open */}
+                    {mouthOpen > 0.1 && (
+                      <ellipse
+                        cx="100"
+                        cy="95"
+                        rx={6 + mouthOpen * 6}
+                        ry={2 + mouthOpen * 8}
+                        fill={currentState.glow}
+                        opacity={0.15 * mouthOpen}
+                      />
+                    )}
+                  </g>
+
                   {/* Neck */}
                   <rect x="90" y="115" width="20" height="25" fill="url(#holoGradient)" opacity={0.7} />
 
@@ -338,7 +368,7 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
                   </g>
 
                   {/* Data Stream Lines on Body */}
-                  <g stroke="#00ffff" strokeWidth="0.5" opacity={0.3}>
+                  <g stroke="#ffffff" strokeWidth="0.5" opacity={0.3}>
                     {Array.from({ length: 10 }).map((_, i) => (
                       <line
                         key={i}

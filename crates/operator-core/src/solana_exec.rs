@@ -101,6 +101,15 @@ impl SolanaExecutor {
         }
     }
 
+    /// Get wallet pubkey for access tier checking (non-async for convenience)
+    pub fn get_wallet_pubkey(&self) -> Option<Pubkey> {
+        // Use try_read to avoid blocking - returns None if locked or no keypair
+        self.keypair
+            .try_read()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|kp| kp.pubkey()))
+    }
+
     /// Execute a voice intent after policy approval
     pub async fn execute_intent(&self, intent: &VoiceIntent) -> Result<ExecutionResult> {
         info!("Executing intent: {:?}", intent.action);
@@ -124,6 +133,71 @@ impl SolanaExecutor {
             IntentAction::Unknown => Ok(ExecutionResult {
                 success: false,
                 message: "Unknown command. Say 'Tetsuo help' for available commands.".into(),
+                signature: None,
+                data: None,
+            }),
+
+            // These actions are handled by specialized executors, not SolanaExecutor
+            IntentAction::CodeFix |
+            IntentAction::CodeReview |
+            IntentAction::CodeGenerate |
+            IntentAction::CodeExplain => Ok(ExecutionResult {
+                success: false,
+                message: "Code operations are handled by GrokCodeExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
+            IntentAction::SwapTokens |
+            IntentAction::GetSwapQuote |
+            IntentAction::GetTokenPrice => Ok(ExecutionResult {
+                success: false,
+                message: "Trading operations are handled by JupiterSwapExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
+            IntentAction::PostTweet |
+            IntentAction::PostThread => Ok(ExecutionResult {
+                success: false,
+                message: "Social operations are handled by TwitterExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
+            // Phase 3: Discord operations handled by DiscordExecutor
+            IntentAction::PostDiscord |
+            IntentAction::PostDiscordEmbed => Ok(ExecutionResult {
+                success: false,
+                message: "Discord operations are handled by DiscordExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
+            // Phase 3: Email operations handled by EmailExecutor
+            IntentAction::SendEmail |
+            IntentAction::SendBulkEmail => Ok(ExecutionResult {
+                success: false,
+                message: "Email operations are handled by EmailExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
+            // Phase 3: Image generation handled by ImageExecutor
+            IntentAction::GenerateImage => Ok(ExecutionResult {
+                success: false,
+                message: "Image generation is handled by ImageExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
+            // GitHub operations handled by GitHubExecutor
+            IntentAction::CreateGist |
+            IntentAction::CreateGitHubIssue |
+            IntentAction::AddGitHubComment |
+            IntentAction::TriggerGitHubWorkflow => Ok(ExecutionResult {
+                success: false,
+                message: "GitHub operations are handled by GitHubExecutor".into(),
                 signature: None,
                 data: None,
             }),

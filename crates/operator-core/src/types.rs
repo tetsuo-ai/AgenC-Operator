@@ -37,9 +37,80 @@ pub enum IntentAction {
     // Protocol Status
     GetProtocolState,
 
+    // Code Operations (Pro tier)
+    CodeFix,
+    CodeReview,
+    CodeGenerate,
+    CodeExplain,
+
+    // Trading Operations (Basic tier)
+    SwapTokens,
+    GetSwapQuote,
+    GetTokenPrice,
+
+    // Social Operations (Pro tier)
+    PostTweet,
+    PostThread,
+
+    // Discord Operations (Pro tier)
+    PostDiscord,
+    PostDiscordEmbed,
+
+    // Email Operations (Pro tier)
+    SendEmail,
+    SendBulkEmail,
+
+    // Image Generation (Pro tier)
+    GenerateImage,
+
+    // GitHub Operations (Pro tier)
+    CreateGist,
+    CreateGitHubIssue,
+    AddGitHubComment,
+    TriggerGitHubWorkflow,
+
     // System
     Help,
     Unknown,
+}
+
+impl IntentAction {
+    /// Get the Feature required for this action (for access tier gating)
+    /// Returns None for actions that don't require feature gating (blockchain ops use policy gate)
+    pub fn required_feature(&self) -> Option<crate::access::Feature> {
+        use crate::access::Feature;
+        match self {
+            // Code operations - Pro tier
+            IntentAction::CodeFix
+            | IntentAction::CodeReview
+            | IntentAction::CodeGenerate
+            | IntentAction::CodeExplain
+            | IntentAction::CreateGist
+            | IntentAction::CreateGitHubIssue
+            | IntentAction::AddGitHubComment
+            | IntentAction::TriggerGitHubWorkflow => Some(Feature::Code),
+
+            // Trading - Basic tier
+            IntentAction::SwapTokens
+            | IntentAction::GetSwapQuote
+            | IntentAction::GetTokenPrice => Some(Feature::Trading),
+
+            // Social - Pro tier (Twitter + Discord)
+            IntentAction::PostTweet
+            | IntentAction::PostThread
+            | IntentAction::PostDiscord
+            | IntentAction::PostDiscordEmbed => Some(Feature::Social),
+
+            // Email - Pro tier
+            IntentAction::SendEmail | IntentAction::SendBulkEmail => Some(Feature::Email),
+
+            // Image generation - Pro tier
+            IntentAction::GenerateImage => Some(Feature::ImageGen),
+
+            // Blockchain operations - no feature gating (policy gate handles these)
+            _ => None,
+        }
+    }
 }
 
 /// Parameters for creating a new task
@@ -177,4 +248,244 @@ pub enum OperatorError {
 
     #[error("Network error: {0}")]
     NetworkError(String),
+}
+
+// ============================================================================
+// Code Operation Types
+// ============================================================================
+
+/// Parameters for code fix operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeFixParams {
+    pub file_path: String,
+    pub issue_description: String,
+    #[serde(default)]
+    pub auto_apply: bool,
+}
+
+/// Parameters for code review operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeReviewParams {
+    pub file_path: String,
+}
+
+/// Parameters for code generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeGenerateParams {
+    pub description: String,
+    pub language: String,
+    #[serde(default)]
+    pub output_path: Option<String>,
+}
+
+/// Parameters for code explanation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeExplainParams {
+    pub file_path: String,
+}
+
+/// Result from code operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeResult {
+    pub code: Option<String>,
+    pub explanation: Option<String>,
+    pub suggestions: Vec<String>,
+}
+
+// ============================================================================
+// Trading/Swap Types
+// ============================================================================
+
+/// Parameters for token swap
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwapParams {
+    pub input_mint: String,
+    pub output_mint: String,
+    /// Amount in smallest denomination (lamports for SOL)
+    pub amount: u64,
+    /// Slippage tolerance in basis points (100 = 1%)
+    #[serde(default = "default_slippage")]
+    pub slippage_bps: u16,
+}
+
+fn default_slippage() -> u16 {
+    50 // 0.5% default
+}
+
+/// Quote response from Jupiter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwapQuote {
+    pub in_amount: String,
+    pub out_amount: String,
+    pub price_impact_pct: String,
+    pub other_amount_threshold: String,
+    pub swap_mode: String,
+}
+
+/// Token price info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenPrice {
+    pub mint: String,
+    pub price_usd: f64,
+}
+
+// ============================================================================
+// Twitter/Social Types
+// ============================================================================
+
+/// Parameters for posting a tweet
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TweetParams {
+    pub text: String,
+    #[serde(default)]
+    pub reply_to_id: Option<String>,
+}
+
+/// Parameters for posting a thread
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadParams {
+    pub tweets: Vec<String>,
+}
+
+/// Result from posting a tweet
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TweetResult {
+    pub tweet_id: String,
+    pub url: String,
+}
+
+// ============================================================================
+// Discord Types
+// ============================================================================
+
+/// Parameters for posting to Discord
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordMessageParams {
+    pub channel_name: String,
+    pub content: String,
+    #[serde(default)]
+    pub server_id: Option<String>,
+}
+
+/// Parameters for posting an embed to Discord
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordEmbedParams {
+    pub channel_name: String,
+    pub title: String,
+    pub description: String,
+    #[serde(default)]
+    pub color: Option<u32>,
+    #[serde(default)]
+    pub server_id: Option<String>,
+}
+
+/// Result from Discord operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordResult {
+    pub message_id: String,
+    pub channel_id: String,
+}
+
+// ============================================================================
+// Email Types
+// ============================================================================
+
+/// Parameters for sending a single email
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailParams {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+    #[serde(default)]
+    pub html: bool,
+}
+
+/// Parameters for sending bulk emails
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BulkEmailParams {
+    pub recipients: Vec<String>,
+    pub subject: String,
+    pub body: String,
+}
+
+/// Result from email operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailResult {
+    pub id: String,
+}
+
+/// Result from bulk email operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BulkEmailResult {
+    pub success: u32,
+    pub failed: u32,
+}
+
+// ============================================================================
+// Image Generation Types
+// ============================================================================
+
+/// Parameters for generating an image
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageGenParams {
+    pub prompt: String,
+    #[serde(default)]
+    pub save_path: Option<String>,
+}
+
+/// Result from image generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageGenResult {
+    pub path: String,
+}
+
+// ============================================================================
+// GitHub Types
+// ============================================================================
+
+/// Parameters for creating a gist
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGistParams {
+    pub description: String,
+    pub filename: String,
+    pub content: String,
+    #[serde(default)]
+    pub public: bool,
+}
+
+/// Parameters for creating a GitHub issue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGitHubIssueParams {
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub repo: Option<String>,
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
+}
+
+/// Parameters for adding a comment to an issue/PR
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddGitHubCommentParams {
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub repo: Option<String>,
+    pub issue_number: u64,
+    pub body: String,
+}
+
+/// Parameters for triggering a workflow
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerGitHubWorkflowParams {
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub repo: Option<String>,
+    pub workflow_id: String,
+    pub ref_name: String,
+    #[serde(default)]
+    pub inputs: Option<serde_json::Value>,
 }

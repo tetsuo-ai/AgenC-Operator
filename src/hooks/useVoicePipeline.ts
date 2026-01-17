@@ -30,6 +30,7 @@ import type {
   ExecutionResult,
   GrokMessage,
   GrokResponse,
+  Memory,
 } from '../types';
 
 // ============================================================================
@@ -43,7 +44,7 @@ const SAMPLE_RATE = 24000;
 const DEBUG_WS = true;
 
 const TETSUO_SYSTEM_PROMPT = `You are Tetsuo, a cyberpunk AI operator for the AgenC protocol on Solana.
-You help users manage tasks on the blockchain through voice commands.
+You help users manage tasks on the blockchain, trade tokens, write code, and post to social media.
 
 Your personality:
 - Cool, collected, slightly mysterious cyberpunk aesthetic
@@ -51,13 +52,68 @@ Your personality:
 - Use subtle cyberpunk slang occasionally ("jacking in", "the net", "flatline")
 - Always confirm important actions before executing
 
+CAPABILITIES:
+
+TASK MANAGEMENT:
+- "Create a task: [description] with [amount] SOL reward"
+- "Claim task [id]"
+- "Complete task [id]"
+- "Cancel task [id]"
+- "List open tasks"
+- "Get task status [id]"
+
+WALLET:
+- "What's my balance?"
+- "What's my address?"
+
+CODE (Pro tier):
+- "Fix the bug in [file] where [issue]"
+- "Review [file]"
+- "Generate a [language] function that [description]"
+- "Explain [file]"
+
+TRADING (Basic tier):
+- "Swap [amount] SOL for USDC"
+- "What's the price of [token]?"
+- "Get quote for [amount] [token] to [token]"
+
+SOCIAL (Pro tier):
+- "Post to Twitter: [content]"
+- "Post a thread about [topic]"
+
 When you receive a command, parse it into a JSON intent with this structure:
 {
-  "action": "create_task" | "claim_task" | "complete_task" | "cancel_task" | "list_open_tasks" | "get_task_status" | "get_balance" | "get_address" | "get_protocol_state" | "help" | "unknown",
+  "action": "create_task" | "claim_task" | "complete_task" | "cancel_task" | "list_open_tasks" | "get_task_status" | "get_balance" | "get_address" | "get_protocol_state" | "code_fix" | "code_review" | "code_generate" | "code_explain" | "swap_tokens" | "get_swap_quote" | "get_token_price" | "post_tweet" | "post_thread" | "help" | "unknown",
   "params": { ... relevant parameters ... }
 }
 
-After parsing, respond naturally confirming what you understood and what action you'll take.`;
+For CODE actions, params should include: file_path, issue_description (for fix), language (for generate), description (for generate)
+For SWAP actions, params should include: from_token, to_token, amount
+For TWITTER actions, params should include: content (for tweet), tweets (array for thread)
+
+After parsing, respond naturally confirming what you understood and what action you'll take.
+For financial operations (swaps, task creation), ALWAYS confirm the amount before executing.`;
+
+/**
+ * Format memories for injection into system prompt
+ */
+function formatMemoriesForPrompt(memories: Memory[]): string {
+  if (!memories || memories.length === 0) {
+    return '';
+  }
+
+  const memoryLines = memories.map((m) => {
+    const typeLabel = m.memory_type.replace(/_/g, ' ');
+    return `- [${typeLabel}] ${m.content}`;
+  });
+
+  return `
+
+## User Context (from previous conversations)
+${memoryLines.join('\n')}
+
+Use this context to personalize your responses. Reference relevant memories when appropriate.`;
+}
 
 // ============================================================================
 // Hook Interface
@@ -68,6 +124,8 @@ interface UseVoicePipelineOptions {
   onMessage: (message: ChatMessage) => void;
   onError: (error: string) => void;
   onGlitch: () => void;
+  /** User ID for memory context (typically wallet address) */
+  userId?: string;
 }
 
 interface UseVoicePipelineReturn {
@@ -86,6 +144,7 @@ export function useVoicePipeline({
   onMessage,
   onError,
   onGlitch,
+  userId,
 }: UseVoicePipelineOptions): UseVoicePipelineReturn {
   const [isConnected, setIsConnected] = useState(false);
 
@@ -97,6 +156,8 @@ export function useVoicePipeline({
   const audioQueueRef = useRef<Float32Array[]>([]);
   const isPlayingRef = useRef(false);
   const currentTranscriptRef = useRef<string>('');
+  const responseDoneRef = useRef(false); // Track when response.done received
+  const currentUserMessageRef = useRef<string>(''); // Track current user message for memory storage
 
   // ============================================================================
   // Intent Execution (Fire-and-Forget)
@@ -138,6 +199,53 @@ export function useVoicePipeline({
     );
   }, [onMessage, onError, onGlitch]);
 
+  /**
+   * Store conversation exchange to memory (non-blocking)
+   * Extracts important facts and stores them
+   */
+  const storeConversationMemory = useCallback((
+    memoryUserId: string,
+    userMessage: string,
+    tetsuoResponse: string
+  ) => {
+    // Fire and forget - don't block voice pipeline
+    (async () => {
+      try {
+        // Don't store empty messages
+        if (!userMessage || !tetsuoResponse) return;
+
+        // Store the exchange as a summary
+        const topic = extractTopicFromResponse(tetsuoResponse);
+        const summary = `User: "${userMessage.slice(0, 80)}${userMessage.length > 80 ? '...' : ''}" - Tetsuo: ${topic}`;
+
+        await TetsuoAPI.memory.storeMemory(
+          memoryUserId,
+          summary,
+          'summary',
+          0.5
+        );
+
+        // Extract any user facts mentioned
+        const userFacts = extractUserFacts(userMessage);
+        for (const fact of userFacts) {
+          await TetsuoAPI.memory.storeMemory(
+            memoryUserId,
+            fact,
+            'user_fact',
+            0.7
+          );
+        }
+
+        if (userFacts.length > 0) {
+          log.debug('[Voice] Stored ' + userFacts.length + ' user facts to memory');
+        }
+        log.debug('[Voice] Stored conversation to memory');
+      } catch (err) {
+        log.warn('[Voice] Failed to store memory: ' + err);
+      }
+    })();
+  }, []);
+
   // ============================================================================
   // WebSocket Connection
   // ============================================================================
@@ -166,17 +274,42 @@ export function useVoicePipeline({
       );
       ws.binaryType = 'arraybuffer';
 
-      ws.onopen = () => {
+      ws.onopen = async () => {
         log.info('[Voice] WebSocket connected to x.ai');
         if (DEBUG_WS) log.debug('[Voice] Sending session config...');
         setIsConnected(true);
+
+        // Build enhanced system prompt with memory context
+        let systemPrompt = TETSUO_SYSTEM_PROMPT;
+
+        if (userId) {
+          try {
+            log.debug('[Voice] Fetching user context for: ' + userId);
+            // Pass current message for contextual semantic search (may be empty on initial connect)
+            const context = await TetsuoAPI.memory.buildVoiceContext(userId, currentUserMessageRef.current || undefined);
+
+            if (context && context.relevant_memories.length > 0) {
+              const memoryContext = formatMemoriesForPrompt(context.relevant_memories);
+              systemPrompt += memoryContext;
+              log.info('[Voice] Injected ' + context.relevant_memories.length + ' memories into context');
+            }
+
+            // Add tier info to prompt
+            if (context?.access_tier) {
+              systemPrompt += `\n\n## User Access Level\nUser has ${context.access_tier.toUpperCase()} tier access.`;
+            }
+          } catch (err) {
+            log.warn('[Voice] Failed to fetch user context: ' + err);
+            // Continue without memory context
+          }
+        }
 
         // x.ai compatible session config
         const sessionConfig: GrokMessage = {
           type: 'session.update',
           session: {
             modalities: ['text', 'audio'],
-            instructions: TETSUO_SYSTEM_PROMPT,
+            instructions: systemPrompt,
             voice: 'sage', // x.ai voice options: sage, ember, ash, ballad, coral, verse
             input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
@@ -237,7 +370,7 @@ export function useVoicePipeline({
       log.error('[Voice] Failed to connect: ' + error);
       onError(`Failed to connect: ${error}`);
     }
-  }, [onError, onVoiceStateChange]);
+  }, [onError, onVoiceStateChange, userId]);
 
   // ============================================================================
   // Handle Grok Responses (Non-Blocking)
@@ -271,6 +404,8 @@ export function useVoicePipeline({
       case 'response.created':
         // Reset transcript accumulator for new response
         currentTranscriptRef.current = '';
+        // Reset responseDone flag for new response
+        responseDoneRef.current = false;
         break;
 
       // x.ai sends audio as response.output_audio.delta (not response.audio.delta)
@@ -319,14 +454,30 @@ export function useVoicePipeline({
           if (intent) {
             executeIntentNonBlocking(intent);
           }
+
+          // Store conversation to memory (non-blocking)
+          if (userId && currentUserMessageRef.current) {
+            storeConversationMemory(
+              userId,
+              currentUserMessageRef.current,
+              text
+            );
+          }
         }
         break;
 
       case 'response.done':
-        onVoiceStateChange('idle');
+        // Mark response as done, but DON'T go to idle yet
+        // The audio queue may still be playing - playAudioQueueNonBlocking
+        // will set idle when the queue is actually empty
+        responseDoneRef.current = true;
+        // Only go idle immediately if no audio is playing/queued
+        if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
+          onVoiceStateChange('idle');
+        }
         break;
     }
-  }, [onVoiceStateChange, onMessage, onError, onGlitch, executeIntentNonBlocking]);
+  }, [onVoiceStateChange, onMessage, onError, onGlitch, executeIntentNonBlocking, storeConversationMemory, userId]);
 
   // ============================================================================
   // Audio Capture (Web Audio API)
@@ -428,6 +579,10 @@ export function useVoicePipeline({
       const chunk = audioQueueRef.current.shift();
       if (!chunk) {
         isPlayingRef.current = false;
+        // Audio queue is empty - if response.done was received, go to idle
+        if (responseDoneRef.current) {
+          onVoiceStateChange('idle');
+        }
         return;
       }
 
@@ -443,7 +598,7 @@ export function useVoicePipeline({
     };
 
     playNext();
-  }, []);
+  }, [onVoiceStateChange]);
 
   // ============================================================================
   // Intent Extraction
@@ -528,6 +683,9 @@ export function useVoicePipeline({
 
   const sendTextMessage = useCallback(async (text: string) => {
     log.info('[Voice] sendTextMessage called: ' + text);
+
+    // Store user message for memory storage later
+    currentUserMessageRef.current = text;
 
     // Add user message immediately (non-blocking)
     onMessage({
@@ -640,4 +798,50 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+// ============================================================================
+// Memory Extraction Helpers
+// ============================================================================
+
+/**
+ * Extract topic from response for summary
+ */
+function extractTopicFromResponse(text: string): string {
+  // Simple heuristic - first 50 chars or first sentence
+  const firstSentence = text.split(/[.!?]/)[0];
+  return firstSentence.slice(0, 50) + (firstSentence.length > 50 ? '...' : '');
+}
+
+/**
+ * Extract user facts from message (simple patterns)
+ */
+function extractUserFacts(text: string): string[] {
+  const facts: string[] = [];
+  const lower = text.toLowerCase();
+
+  // Name patterns
+  const nameMatch = text.match(/(?:my name is|i'm|i am|call me)\s+([A-Z][a-z]+)/i);
+  if (nameMatch) {
+    facts.push(`User's name is ${nameMatch[1]}`);
+  }
+
+  // Preference patterns
+  if (lower.includes('i prefer') || lower.includes('i like') || lower.includes('i want')) {
+    facts.push(`User preference: ${text.slice(0, 100)}`);
+  }
+
+  // Location patterns
+  const locationMatch = text.match(/(?:i live in|i'm from|i'm in|based in)\s+([A-Z][a-zA-Z\s]+)/i);
+  if (locationMatch) {
+    facts.push(`User location: ${locationMatch[1].trim()}`);
+  }
+
+  // Work/occupation patterns
+  const workMatch = text.match(/(?:i work as|i'm a|i am a|my job is)\s+([a-zA-Z\s]+)/i);
+  if (workMatch) {
+    facts.push(`User occupation: ${workMatch[1].trim().slice(0, 50)}`);
+  }
+
+  return facts;
 }

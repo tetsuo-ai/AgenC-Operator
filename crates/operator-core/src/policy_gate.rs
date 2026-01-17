@@ -152,6 +152,107 @@ impl PolicyGate {
                     reason: "Cancelling task requires typed confirmation".into(),
                 }
             }
+
+            // Code Operations (Pro tier) - read-only style, no confirmation needed
+            IntentAction::CodeFix |
+            IntentAction::CodeReview |
+            IntentAction::CodeGenerate |
+            IntentAction::CodeExplain => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: false,
+                    confirmation_type: ConfirmationType::None,
+                    reason: "Code operation (Pro tier required)".into(),
+                }
+            }
+
+            // Trading - Quote/Price lookups are read-only
+            IntentAction::GetSwapQuote |
+            IntentAction::GetTokenPrice => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: false,
+                    confirmation_type: ConfirmationType::None,
+                    reason: "Read-only trading operation".into(),
+                }
+            }
+
+            // Trading - Actual swaps need confirmation based on amount
+            IntentAction::SwapTokens => {
+                self.check_spending_action(intent, "token swap")
+            }
+
+            // Social Operations (Pro tier) - verbal confirmation for posting
+            IntentAction::PostTweet => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Verbal,
+                    reason: "Tweet posting requires verbal confirmation".into(),
+                }
+            }
+
+            IntentAction::PostThread => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Verbal,
+                    reason: "Thread posting requires verbal confirmation".into(),
+                }
+            }
+
+            // Phase 3: Discord Operations (Pro tier) - verbal confirmation for posting
+            IntentAction::PostDiscord |
+            IntentAction::PostDiscordEmbed => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Verbal,
+                    reason: "Discord posting requires verbal confirmation".into(),
+                }
+            }
+
+            // Phase 3: Email Operations (Pro tier) - verbal confirmation
+            IntentAction::SendEmail => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Verbal,
+                    reason: "Email sending requires verbal confirmation".into(),
+                }
+            }
+
+            IntentAction::SendBulkEmail => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Typed,
+                    reason: "Bulk email sending requires typed confirmation".into(),
+                }
+            }
+
+            // Phase 3: Image Generation (Pro tier) - no confirmation needed
+            IntentAction::GenerateImage => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: false,
+                    confirmation_type: ConfirmationType::None,
+                    reason: "Image generation (Pro tier required)".into(),
+                }
+            }
+
+            // GitHub Operations (Pro tier) - verbal confirmation for external actions
+            IntentAction::CreateGist |
+            IntentAction::CreateGitHubIssue |
+            IntentAction::AddGitHubComment |
+            IntentAction::TriggerGitHubWorkflow => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Verbal,
+                    reason: "GitHub operation requires verbal confirmation".into(),
+                }
+            }
         }
     }
 
@@ -321,6 +422,38 @@ mod tests {
     }
 
     #[test]
+    fn test_all_read_only_operations() {
+        let gate = PolicyGate::new();
+        let read_only_actions = [
+            IntentAction::ListOpenTasks,
+            IntentAction::GetTaskStatus,
+            IntentAction::GetBalance,
+            IntentAction::GetAddress,
+            IntentAction::GetProtocolState,
+            IntentAction::Help,
+            IntentAction::Unknown,
+            IntentAction::GetSwapQuote,
+            IntentAction::GetTokenPrice,
+        ];
+
+        for action in read_only_actions {
+            let intent = VoiceIntent {
+                action,
+                params: serde_json::json!({}),
+                raw_transcript: None,
+            };
+
+            let check = gate.check_policy(&intent);
+            assert!(check.allowed, "Action {:?} should be allowed", intent.action);
+            assert!(
+                !check.requires_confirmation,
+                "Action {:?} should not require confirmation",
+                intent.action
+            );
+        }
+    }
+
+    #[test]
     fn test_spending_requires_confirmation() {
         let gate = PolicyGate::new();
         let intent = VoiceIntent {
@@ -335,9 +468,315 @@ mod tests {
     }
 
     #[test]
+    fn test_small_amount_voice_only() {
+        let gate = PolicyGate::new();
+        let intent = VoiceIntent {
+            action: IntentAction::CreateTask,
+            params: serde_json::json!({ "reward_sol": 0.05 }),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        assert!(check.allowed);
+        assert!(check.requires_confirmation);
+        assert_eq!(check.confirmation_type, ConfirmationType::Verbal);
+    }
+
+    #[test]
+    fn test_large_amount_typed_confirmation() {
+        let gate = PolicyGate::new();
+        let intent = VoiceIntent {
+            action: IntentAction::SwapTokens,
+            params: serde_json::json!({ "amount_sol": 2.0 }),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        assert!(check.allowed);
+        assert!(check.requires_confirmation);
+        // Without hardware wallet, large amounts need typed confirmation
+        assert_eq!(check.confirmation_type, ConfirmationType::Typed);
+    }
+
+    #[test]
+    fn test_hardware_wallet_for_large_amounts() {
+        let mut gate = PolicyGate::new();
+        gate.set_hardware_wallet(true);
+
+        let intent = VoiceIntent {
+            action: IntentAction::SwapTokens,
+            params: serde_json::json!({ "amount_sol": 5.0 }),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        assert!(check.allowed);
+        assert_eq!(check.confirmation_type, ConfirmationType::Hardware);
+    }
+
+    #[test]
+    fn test_session_limit_enforcement() {
+        let mut gate = PolicyGate::new();
+
+        // Record spending up to near limit
+        gate.record_spending(9_000_000_000); // 9 SOL
+
+        // Try to spend more that would exceed limit
+        let intent = VoiceIntent {
+            action: IntentAction::CreateTask,
+            params: serde_json::json!({ "reward_sol": 2.0 }),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        // Should be blocked without hardware wallet
+        assert!(!check.allowed);
+        assert_eq!(check.confirmation_type, ConfirmationType::Hardware);
+    }
+
+    #[test]
+    fn test_session_limit_with_hardware_wallet() {
+        let mut gate = PolicyGate::new();
+        gate.set_hardware_wallet(true);
+
+        // Record spending up to near limit
+        gate.record_spending(9_000_000_000); // 9 SOL
+
+        let intent = VoiceIntent {
+            action: IntentAction::CreateTask,
+            params: serde_json::json!({ "reward_sol": 2.0 }),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        // Should be allowed with hardware wallet
+        assert!(check.allowed);
+    }
+
+    #[test]
+    fn test_blocked_action() {
+        let gate = PolicyGate::new();
+        let intent = VoiceIntent {
+            action: IntentAction::Unknown, // Would need a way to test blocked actions
+            params: serde_json::json!({}),
+            raw_transcript: None,
+        };
+
+        // The Unknown action isn't blocked by default
+        let check = gate.check_policy(&intent);
+        assert!(check.allowed);
+    }
+
+    #[test]
+    fn test_session_spending_tracking() {
+        let mut gate = PolicyGate::new();
+
+        assert_eq!(gate.session_spending_sol(), 0.0);
+
+        gate.record_spending(500_000_000); // 0.5 SOL
+        assert_eq!(gate.session_spending_sol(), 0.5);
+
+        gate.record_spending(1_500_000_000); // 1.5 SOL
+        assert_eq!(gate.session_spending_sol(), 2.0);
+    }
+
+    #[test]
+    fn test_session_reset() {
+        let mut gate = PolicyGate::new();
+        gate.record_spending(5_000_000_000);
+        assert_eq!(gate.session_spending_sol(), 5.0);
+
+        gate.reset_session();
+        assert_eq!(gate.session_spending_sol(), 0.0);
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = PolicyConfig {
+            allow_voice_only_small: false,
+            voice_only_max_sol: 0.0,
+            always_require_typed: true,
+            hardware_for_large: false,
+            large_threshold_sol: 10.0,
+            blocked_actions: vec![],
+        };
+
+        let gate = PolicyGate::with_config(config);
+
+        let intent = VoiceIntent {
+            action: IntentAction::CreateTask,
+            params: serde_json::json!({ "reward_sol": 0.01 }),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        // With always_require_typed, even small amounts need typed confirmation
+        assert!(check.requires_confirmation);
+        assert_eq!(check.confirmation_type, ConfirmationType::Typed);
+    }
+
+    #[test]
+    fn test_code_operations_no_confirmation() {
+        let gate = PolicyGate::new();
+        let code_actions = [
+            IntentAction::CodeFix,
+            IntentAction::CodeReview,
+            IntentAction::CodeGenerate,
+            IntentAction::CodeExplain,
+        ];
+
+        for action in code_actions {
+            let intent = VoiceIntent {
+                action,
+                params: serde_json::json!({}),
+                raw_transcript: None,
+            };
+
+            let check = gate.check_policy(&intent);
+            assert!(check.allowed);
+            assert!(!check.requires_confirmation);
+        }
+    }
+
+    #[test]
+    fn test_social_operations_verbal_confirmation() {
+        let gate = PolicyGate::new();
+        let social_actions = [
+            IntentAction::PostTweet,
+            IntentAction::PostThread,
+            IntentAction::PostDiscord,
+            IntentAction::PostDiscordEmbed,
+            IntentAction::SendEmail,
+        ];
+
+        for action in social_actions {
+            let intent = VoiceIntent {
+                action,
+                params: serde_json::json!({}),
+                raw_transcript: None,
+            };
+
+            let check = gate.check_policy(&intent);
+            assert!(check.allowed);
+            assert!(check.requires_confirmation);
+            assert_eq!(check.confirmation_type, ConfirmationType::Verbal);
+        }
+    }
+
+    #[test]
+    fn test_bulk_email_typed_confirmation() {
+        let gate = PolicyGate::new();
+        let intent = VoiceIntent {
+            action: IntentAction::SendBulkEmail,
+            params: serde_json::json!({}),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        assert!(check.allowed);
+        assert!(check.requires_confirmation);
+        assert_eq!(check.confirmation_type, ConfirmationType::Typed);
+    }
+
+    #[test]
+    fn test_image_generation_no_confirmation() {
+        let gate = PolicyGate::new();
+        let intent = VoiceIntent {
+            action: IntentAction::GenerateImage,
+            params: serde_json::json!({}),
+            raw_transcript: None,
+        };
+
+        let check = gate.check_policy(&intent);
+        assert!(check.allowed);
+        assert!(!check.requires_confirmation);
+    }
+
+    #[test]
+    fn test_extract_sol_from_reward() {
+        let gate = PolicyGate::new();
+        let params = serde_json::json!({ "reward_sol": 1.5 });
+        assert_eq!(gate.extract_sol_amount(&params), 1.5);
+    }
+
+    #[test]
+    fn test_extract_sol_from_amount() {
+        let gate = PolicyGate::new();
+        let params = serde_json::json!({ "amount_sol": 2.5 });
+        assert_eq!(gate.extract_sol_amount(&params), 2.5);
+    }
+
+    #[test]
+    fn test_extract_sol_from_lamports() {
+        let gate = PolicyGate::new();
+        let params = serde_json::json!({ "lamports": 1_000_000_000_u64 });
+        assert_eq!(gate.extract_sol_amount(&params), 1.0);
+    }
+
+    #[test]
+    fn test_extract_sol_default() {
+        let gate = PolicyGate::new();
+        let params = serde_json::json!({});
+        assert_eq!(gate.extract_sol_amount(&params), 0.0);
+    }
+
+    #[test]
     fn test_verbal_confirmation() {
         assert!(VerbalConfirmation::is_confirmed("Yes, do it"));
         assert!(VerbalConfirmation::is_cancelled("No, cancel that"));
         assert!(!VerbalConfirmation::is_confirmed("maybe"));
+    }
+
+    #[test]
+    fn test_verbal_confirmation_phrases() {
+        // Test all confirm phrases
+        for phrase in VerbalConfirmation::CONFIRM_PHRASES {
+            assert!(
+                VerbalConfirmation::is_confirmed(phrase),
+                "'{}' should be confirmed",
+                phrase
+            );
+        }
+
+        // Test all cancel phrases
+        for phrase in VerbalConfirmation::CANCEL_PHRASES {
+            assert!(
+                VerbalConfirmation::is_cancelled(phrase),
+                "'{}' should be cancelled",
+                phrase
+            );
+        }
+    }
+
+    #[test]
+    fn test_verbal_confirmation_case_insensitive() {
+        assert!(VerbalConfirmation::is_confirmed("YES"));
+        assert!(VerbalConfirmation::is_confirmed("Confirm"));
+        assert!(VerbalConfirmation::is_cancelled("NO"));
+        assert!(VerbalConfirmation::is_cancelled("CANCEL"));
+    }
+
+    #[test]
+    fn test_config_update() {
+        let mut gate = PolicyGate::new();
+
+        let new_config = PolicyConfig {
+            voice_only_max_sol: 0.5,
+            ..PolicyConfig::default()
+        };
+
+        gate.update_config(new_config);
+        assert_eq!(gate.config().voice_only_max_sol, 0.5);
+    }
+
+    #[test]
+    fn test_policy_config_default() {
+        let config = PolicyConfig::default();
+        assert!(config.allow_voice_only_small);
+        assert_eq!(config.voice_only_max_sol, 0.1);
+        assert!(!config.always_require_typed);
+        assert!(config.hardware_for_large);
+        assert_eq!(config.large_threshold_sol, HIGH_VALUE_THRESHOLD_SOL);
+        assert!(config.blocked_actions.contains(&"export_key".to_string()));
     }
 }

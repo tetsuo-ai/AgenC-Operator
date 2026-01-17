@@ -19,10 +19,19 @@
     box-sizing: border-box;
   }
 
+  :root {
+    --neon-dock: #000000;
+    --neon-dock-rgb: 0, 0, 0;
+    --neon-electric: #ffffff;
+    --neon-electric-rgb: 255, 255, 255;
+    --neon-muted: #333333;
+    --neon-muted-rgb: 51, 51, 51;
+  }
+
   html {
     font-family: 'JetBrains Mono', monospace;
-    color: #e0e0ff;
-    background: #0a0a0f;
+    color: #ffffff;
+    background: #000000;
     /* Prevent text selection for UI elements */
     -webkit-user-select: none;
     user-select: none;
@@ -33,22 +42,13 @@
     padding: 0;
     min-height: 100vh;
     overflow: hidden;
-    /* Cyberpunk background image */
-    background-image: url('/bg-cyberpunk.jpg');
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
+    /* Solid black background */
+    background: #000000;
   }
 
-  /* Dark overlay for better UI readability */
+  /* Dark overlay removed - pure black background */
   body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background: rgba(10, 10, 15, 0.7);
-    pointer-events: none;
-    z-index: 0;
+    display: none;
   }
 
   /* Make root fill viewport */
@@ -87,38 +87,34 @@
       0 0 5px currentColor;
   }
 
-  /* Cyber panel - glass morphism with neon border */
+  /* Cyber panel - black with white border */
   .cyber-panel {
-    background: linear-gradient(
-      135deg,
-      rgba(10, 10, 15, 0.9) 0%,
-      rgba(18, 18, 26, 0.8) 100%
-    );
+    background: #000000;
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(0, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 4px;
     box-shadow:
-      0 0 10px rgba(0, 255, 255, 0.1),
-      inset 0 0 30px rgba(0, 255, 255, 0.02);
+      0 0 10px rgba(255, 255, 255, 0.1),
+      inset 0 0 30px rgba(255, 255, 255, 0.02);
   }
 
   .cyber-panel-magenta {
-    border-color: rgba(255, 0, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.3);
     box-shadow:
-      0 0 10px rgba(255, 0, 255, 0.1),
-      inset 0 0 30px rgba(255, 0, 255, 0.02);
+      0 0 10px rgba(255, 255, 255, 0.1),
+      inset 0 0 30px rgba(255, 255, 255, 0.02);
   }
 
-  /* Cyber button */
+  /* Cyber button - black and white */
   .cyber-btn {
     @apply px-4 py-2 font-mono text-sm uppercase tracking-wider;
     background: linear-gradient(
       180deg,
-      rgba(0, 255, 255, 0.1) 0%,
-      rgba(0, 255, 255, 0.05) 100%
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.05) 100%
     );
-    border: 1px solid rgba(0, 255, 255, 0.5);
-    color: #00ffff;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    color: #ffffff;
     transition: all 0.2s ease;
     clip-path: polygon(
       0 0,
@@ -133,11 +129,11 @@
   .cyber-btn:hover {
     background: linear-gradient(
       180deg,
-      rgba(0, 255, 255, 0.2) 0%,
-      rgba(0, 255, 255, 0.1) 100%
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.1) 100%
     );
-    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
-    text-shadow: 0 0 10px #00ffff;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+    text-shadow: 0 0 10px #ffffff;
   }
 
   .cyber-btn:active {
@@ -145,42 +141,42 @@
   }
 
   .cyber-btn-magenta {
-    border-color: rgba(255, 0, 255, 0.5);
-    color: #ff00ff;
+    border-color: rgba(255, 255, 255, 0.5);
+    color: #ffffff;
     background: linear-gradient(
       180deg,
-      rgba(255, 0, 255, 0.1) 0%,
-      rgba(255, 0, 255, 0.05) 100%
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.05) 100%
     );
   }
 
   .cyber-btn-magenta:hover {
     background: linear-gradient(
       180deg,
-      rgba(255, 0, 255, 0.2) 0%,
-      rgba(255, 0, 255, 0.1) 100%
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.1) 100%
     );
-    box-shadow: 0 0 20px rgba(255, 0, 255, 0.3);
-    text-shadow: 0 0 10px #ff00ff;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+    text-shadow: 0 0 10px #ffffff;
   }
 
-  /* Cyber input */
+  /* Cyber input - black and white */
   .cyber-input {
     @apply px-3 py-2 font-mono text-sm;
-    background: rgba(10, 10, 15, 0.8);
-    border: 1px solid rgba(0, 255, 255, 0.3);
-    color: #e0e0ff;
+    background: #000000;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #ffffff;
     outline: none;
     transition: all 0.2s ease;
   }
 
   .cyber-input:focus {
-    border-color: rgba(0, 255, 255, 0.8);
-    box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
   }
 
   .cyber-input::placeholder {
-    color: rgba(0, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.3);
   }
 
   /* Scanline overlay */
@@ -204,7 +200,7 @@
     animation: scanline 8s linear infinite;
   }
 
-  /* Glitch text effect */
+  /* Glitch text effect - white */
   .glitch {
     position: relative;
   }
@@ -221,13 +217,13 @@
   }
 
   .glitch::before {
-    color: #ff00ff;
+    color: #ffffff;
     animation: glitch-1 0.3s infinite;
     clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
   }
 
   .glitch::after {
-    color: #00ffff;
+    color: #cccccc;
     animation: glitch-2 0.3s infinite;
     clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
   }
@@ -261,11 +257,11 @@
    ============================================================================ */
 
 @layer utilities {
-  /* Grid background */
+  /* Grid background - white lines on black */
   .bg-cyber-grid {
     background-image:
-      linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
     background-size: 30px 30px;
   }
 
@@ -343,12 +339,8 @@
 
 .titlebar {
   height: 32px;
-  background: linear-gradient(
-    90deg,
-    rgba(10, 10, 15, 0.95) 0%,
-    rgba(18, 18, 26, 0.95) 100%
-  );
-  border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+  background: #000000;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -367,8 +359,8 @@
   font-weight: 500;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: #00ffff;
-  text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+  color: #ffffff;
+  text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
 }
 
 .window-controls {

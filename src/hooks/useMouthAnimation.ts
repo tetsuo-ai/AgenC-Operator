@@ -6,7 +6,7 @@
  * Also provides appliers for morph targets and jaw bones.
  */
 
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import {
   MouthDriver,
@@ -265,4 +265,56 @@ export function useMouthAnimation(
     getMouthDriver,
     reset,
   };
+}
+
+// ============================================================================
+// Simple 2D Hook for SVG/Canvas Avatars
+// ============================================================================
+
+interface UseMouthOpen2DOptions {
+  /** Whether animation should be active (e.g., when speaking) */
+  enabled: boolean;
+  /** Update rate in ms (default 33ms = ~30fps) */
+  updateRate?: number;
+}
+
+/**
+ * Simple hook that provides a 0-1 mouth open value for 2D avatars.
+ * Polls the global MouthDriver to get mouth open value driven by audio amplitude.
+ */
+export function useMouthOpen2D({ enabled, updateRate = 33 }: UseMouthOpen2DOptions): number {
+  const [mouthOpen, setMouthOpen] = useState(0);
+  const frameRef = useRef<number | null>(null);
+  const lastUpdateRef = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setMouthOpen(0);
+      return;
+    }
+
+    const mouthDriver = getGlobalMouthDriver();
+
+    const update = (timestamp: number) => {
+      // Throttle updates to updateRate
+      if (timestamp - lastUpdateRef.current >= updateRate) {
+        const value = mouthDriver.getMouthOpen();
+        setMouthOpen(value);
+        lastUpdateRef.current = timestamp;
+      }
+      frameRef.current = requestAnimationFrame(update);
+    };
+
+    frameRef.current = requestAnimationFrame(update);
+
+    return () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      setMouthOpen(0);
+    };
+  }, [enabled, updateRate]);
+
+  return mouthOpen;
 }

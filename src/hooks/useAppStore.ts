@@ -16,6 +16,7 @@ import type {
   ChatMessage,
   AgentAppearance,
   AppearancePreset,
+  AccessTierInfo,
 } from '../types';
 import { DEFAULT_APPEARANCE } from '../types';
 
@@ -83,6 +84,10 @@ interface AppState {
   wallet: WalletInfo | null;
   setWallet: (wallet: WalletInfo | null) => void;
 
+  // Access Tier (Token Gating)
+  accessTier: AccessTierInfo | null;
+  setAccessTier: (tier: AccessTierInfo | null) => void;
+
   // Protocol State
   protocolState: ProtocolState | null;
   setProtocolState: (state: ProtocolState | null) => void;
@@ -131,6 +136,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Wallet
   wallet: null,
   setWallet: (wallet) => set({ wallet }),
+
+  // Access Tier (Token Gating)
+  accessTier: null,
+  setAccessTier: (accessTier) => set({ accessTier }),
 
   // Protocol State
   protocolState: null,
@@ -217,6 +226,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 export const useVoiceState = () => useAppStore((state) => state.voiceState);
 export const useWallet = () => useAppStore((state) => state.wallet);
+export const useAccessTier = () => useAppStore((state) => state.accessTier);
 export const useProtocolState = () => useAppStore((state) => state.protocolState);
 export const useMessages = () => useAppStore((state) => state.messages);
 export const useAppearance = () => useAppStore((state) => state.appearance);

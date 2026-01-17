@@ -19,6 +19,8 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentAppearance, AgentStatus } from '../../types';
+import { NEON_PALETTE } from '../../styles/palette';
+import { useMouthOpen2D } from '../../hooks/useMouthAnimation';
 
 // ============================================================================
 // Props Interface
@@ -65,13 +67,13 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
 
   const { mode, micActive } = status;
 
-  // Calculate effective glow color based on mode
+  // Get mouth open value from audio analysis
+  const mouthOpen = useMouthOpen2D({ enabled: mode === 'speaking' });
+
+  // Calculate effective glow color based on mode - white only
   const effectiveGlowColor = useMemo(() => {
-    if (mode === 'error') {
-      return '#ff3366'; // Red tint for error
-    }
-    return eyeGlowColor;
-  }, [mode, eyeGlowColor]);
+    return '#ffffff';
+  }, []);
 
   // Calculate glow intensity based on mode and mic state
   const glowIntensity = useMemo(() => {
@@ -99,7 +101,7 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
         size: Math.random() * 3 + 1,
         speed: Math.random() * 2 + 0.5,
         opacity: Math.random() * 0.5 + 0.2,
-        color: Math.random() > 0.5 ? accentColor : '#ff00ff',
+        color: '#ffffff',
       });
     }
     setParticles(newParticles);
@@ -124,8 +126,8 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Draw horizontal scanlines
-      ctx.strokeStyle = `rgba(0, 255, 255, ${scanlineIntensity * glowIntensity})`;
+      // Draw horizontal scanlines - white
+      ctx.strokeStyle = `rgba(255, 255, 255, ${scanlineIntensity * glowIntensity})`;
       ctx.lineWidth = 1;
       for (let y = 0; y < canvas.height; y += 4) {
         ctx.beginPath();
@@ -134,14 +136,14 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
         ctx.stroke();
       }
 
-      // Draw data stream lines
+      // Draw data stream lines - white
       const time = Date.now() / 1000;
       for (let i = 0; i < 5; i++) {
         const x = (i * 60 + time * 30) % canvas.width;
         const gradient = ctx.createLinearGradient(x, 0, x, canvas.height);
-        gradient.addColorStop(0, `${accentColor}00`);
-        gradient.addColorStop(0.5, `${accentColor}1a`);
-        gradient.addColorStop(1, `${accentColor}00`);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.1)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
         ctx.strokeStyle = gradient;
         ctx.lineWidth = 2;
@@ -265,15 +267,15 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
                     </filter>
 
                     <linearGradient id={`holoGradient-2d-${layer}`} x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#e0e0ff" stopOpacity="0.9" />
-                      <stop offset="50%" stopColor={accentColor} stopOpacity="0.7" />
-                      <stop offset="100%" stopColor="#bf00ff" stopOpacity="0.5" />
+                      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+                      <stop offset="50%" stopColor="#ffffff" stopOpacity="0.7" />
+                      <stop offset="100%" stopColor="#000000" stopOpacity="0.5" />
                     </linearGradient>
 
                     <linearGradient id={`hairGradient-2d-${layer}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor={hairColor} />
-                      <stop offset="50%" stopColor={`${hairColor}e0`} />
-                      <stop offset="100%" stopColor={`${hairColor}c0`} />
+                      <stop offset="0%" stopColor="#ffffff" />
+                      <stop offset="50%" stopColor="#cccccc" />
+                      <stop offset="100%" stopColor="#999999" />
                     </linearGradient>
                   </defs>
 
@@ -289,14 +291,14 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
                   {/* Additional Hair Strands */}
                   <path
                     d="M60 60 Q40 90 35 140 Q30 180 45 200"
-                    stroke={hairColor}
+                    stroke="#ffffff"
                     strokeWidth="3"
                     fill="none"
                     opacity={0.6}
                   />
                   <path
                     d="M140 60 Q160 90 165 140 Q170 180 155 200"
-                    stroke={hairColor}
+                    stroke="#ffffff"
                     strokeWidth="3"
                     fill="none"
                     opacity={0.6}
@@ -354,6 +356,31 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
                     <ellipse cx="115" cy="70" rx="12" ry="8" fill={effectiveGlowColor} opacity={0.2 * glowIntensity} />
                   </g>
 
+                  {/* Mouth - animated by audio */}
+                  <g className="mouth">
+                    {/* Mouth shape that opens based on audio amplitude */}
+                    <ellipse
+                      cx="100"
+                      cy="95"
+                      rx={4 + mouthOpen * 4}
+                      ry={1 + mouthOpen * 6}
+                      fill={effectiveGlowColor}
+                      filter={`url(#glow-2d-${layer})`}
+                      opacity={0.8}
+                    />
+                    {/* Mouth glow when open */}
+                    {mouthOpen > 0.1 && (
+                      <ellipse
+                        cx="100"
+                        cy="95"
+                        rx={6 + mouthOpen * 6}
+                        ry={2 + mouthOpen * 8}
+                        fill={effectiveGlowColor}
+                        opacity={0.15 * mouthOpen * glowIntensity}
+                      />
+                    )}
+                  </g>
+
                   {/* Neck */}
                   <rect x="90" y="115" width="20" height="25" fill={`url(#holoGradient-2d-${layer})`} opacity={0.7} />
 
@@ -385,7 +412,7 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
                   </g>
 
                   {/* Data Stream Lines on Body */}
-                  <g stroke={accentColor} strokeWidth="0.5" opacity={0.3 * glowIntensity}>
+                  <g stroke="#ffffff" strokeWidth="0.5" opacity={0.3 * glowIntensity}>
                     {Array.from({ length: 10 }).map((_, i) => (
                       <line
                         key={i}
@@ -437,7 +464,7 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
               <motion.div
                 key={i}
                 className="w-1 rounded-full"
-                style={{ backgroundColor: accentColor }}
+                style={{ backgroundColor: '#ffffff' }}
                 animate={{
                   height: [8, 24, 8],
                 }}

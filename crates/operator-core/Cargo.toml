@@ -7,7 +7,19 @@ authors.workspace = true
 [dependencies]
 # Async runtime
 tokio = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { workspace = true }
+
+# Vector database for memory
+qdrant-client = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# SPL token for token gating
+spl-associated-token-account = { workspace = true }
+
+# HTTP client for embeddings API
+reqwest = { workspace = true }
 
 
 # Solana
@@ -41,3 +53,21 @@ bs58 = "0.5"
 
 # Secure random for keypair generation
 rand = "0.8"
+
+# Async trait for executor interface
+async-trait = "0.1"
+
+# Twitter OAuth 1.0a signing (kept for backwards compat)
+hmac = "0.12"
+sha1 = "0.10"
+percent-encoding = "2.3"
+base64 = "0.22"
+
+# Transaction serialization
+bincode = "1.3"
+
+# Twitter OAuth 2.0 + PKCE
+tiny_http = "0.12"
+sha2 = "0.10"
+url = "2.5"
+urlencoding = "2.1"

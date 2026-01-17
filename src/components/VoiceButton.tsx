@@ -26,13 +26,13 @@ export default function VoiceButton({
   const isSpeaking = voiceState === 'speaking';
   const isActive = isListening || isProcessing || isSpeaking;
 
-  // State-based colors
+  // State-based colors - black and white only
   const stateConfig = {
-    idle: { color: '#00ffff', label: 'ACTIVATE' },
-    listening: { color: '#00ff80', label: 'LISTENING' },
-    processing: { color: '#ff00ff', label: 'PROCESSING' },
-    speaking: { color: '#00ffff', label: 'SPEAKING' },
-    error: { color: '#ff3366', label: 'ERROR' },
+    idle: { color: '#ffffff', label: 'ACTIVATE' },
+    listening: { color: '#ffffff', label: 'LISTENING' },
+    processing: { color: '#cccccc', label: 'PROCESSING' },
+    speaking: { color: '#ffffff', label: 'SPEAKING' },
+    error: { color: '#ffffff', label: 'ERROR' },
   };
 
   const config = stateConfig[voiceState];
@@ -70,22 +70,22 @@ export default function VoiceButton({
       <motion.button
         onClick={onClick}
         disabled={isProcessing || isSpeaking}
-        className="relative w-20 h-20 rounded-full flex items-center justify-center"
+        className="relative w-12 h-12 rounded-full flex items-center justify-center"
         style={{
           background: `radial-gradient(circle at 30% 30%, ${config.color}40 0%, ${config.color}10 50%, transparent 70%)`,
           border: `2px solid ${config.color}`,
           boxShadow: `
-            0 0 20px ${config.color}40,
-            0 0 40px ${config.color}20,
-            inset 0 0 20px ${config.color}10
+            0 0 15px ${config.color}40,
+            0 0 30px ${config.color}20,
+            inset 0 0 15px ${config.color}10
           `,
         }}
         whileHover={{
           scale: 1.05,
           boxShadow: `
-            0 0 30px ${config.color}60,
-            0 0 60px ${config.color}30,
-            inset 0 0 30px ${config.color}20
+            0 0 20px ${config.color}60,
+            0 0 40px ${config.color}30,
+            inset 0 0 20px ${config.color}20
           `,
         }}
         whileTap={{ scale: 0.95 }}
@@ -111,8 +111,8 @@ export default function VoiceButton({
         >
           {/* Microphone Icon */}
           <svg
-            width="32"
-            height="32"
+            width="20"
+            height="20"
             viewBox="0 0 24 24"
             fill="none"
             stroke={config.color}
@@ -201,13 +201,13 @@ export default function VoiceButton({
 
       {/* State Label */}
       <motion.div
-        className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap"
+        className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         key={voiceState}
       >
         <span
-          className="font-display text-xs uppercase tracking-widest"
+          className="font-display text-[10px] uppercase tracking-widest"
           style={{ color: config.color }}
         >
           {config.label}
@@ -215,9 +215,9 @@ export default function VoiceButton({
       </motion.div>
 
       {/* Connection Status */}
-      <div className="absolute -top-2 -right-2">
+      <div className="absolute -top-1 -right-1">
         <motion.div
-          className={`w-3 h-3 rounded-full border ${
+          className={`w-2.5 h-2.5 rounded-full border ${
             isConnected
               ? 'bg-neon-green/50 border-neon-green'
               : 'bg-red-500/50 border-red-500'
