@@ -10,16 +10,37 @@ A cyberpunk themed voice controlled desktop operator for the [AgenC Solana proto
 
 ## Features
 
+### Core Features
+
 | Feature | Description |
 |---------|-------------|
-| **Voice Control** | Create tasks, check balances, list open tasks through natural voice commands |
+| **Voice Control** | Natural voice commands for all operations via Grok Voice API |
 | **Swappable Avatar** | Toggle between 2.5D SVG/Canvas and full 3D GLB model rendering |
-| **Customizable Appearance** | Real time color pickers, effect toggles, and preset system |
+| **Customizable Appearance** | Real-time color pickers, effect toggles, and preset system |
 | **Cyberpunk Aesthetics** | Neon glows, glitch effects, scanlines, holographic UI |
 | **Local First Security** | Private keys never leave your device |
 | **Policy Gate** | Spending operations require verbal + typed/hardware confirmation |
 | **Offline Fallback** | Local Whisper ASR when Grok API is unavailable |
-| **Real Time Protocol State** | HUD displays open tasks, TVL, and active operators |
+
+### Access Tiers (Token-Gated Features)
+
+| Tier | TETSUO Required | Features |
+|------|-----------------|----------|
+| **Basic** | 1,000 | Trading (Jupiter swaps, quotes, prices) |
+| **Pro** | 10,000 | + Code ops, Twitter, Discord, Email, Image Gen, GitHub |
+| **Elite** | 100,000 | + Priority support, early access, custom features |
+
+### Integrations
+
+| Integration | Features |
+|-------------|----------|
+| **Twitter/X** | OAuth connection, post tweets, post threads |
+| **Discord** | Post messages, send embeds to channels |
+| **GitHub** | Create gists, issues, comments, trigger workflows |
+| **Email** | Send single emails, bulk email campaigns (via Resend) |
+| **Jupiter** | Token swaps, price quotes, market data |
+| **Grok** | Voice API, code operations, image generation |
+| **Memory** | Conversation history with vector embeddings (Qdrant + OpenAI) |
 
 ## Architecture
 
@@ -33,20 +54,25 @@ agenc-operator/
 │   │   │   ├── TetsuoAvatar3D.tsx    # Three.js GLB renderer
 │   │   │   └── ErrorBoundary.tsx     # Graceful 3D failure handling
 │   │   ├── AppearanceMenu.tsx    # Customization panel
-│   │   ├── TetsuoHologram.tsx    # Legacy avatar (deprecated)
+│   │   ├── WalletDropdown.tsx    # Wallet connection dropdown
+│   │   ├── TwitterConnect.tsx    # Twitter OAuth component
+│   │   ├── AccessTierBadge.tsx   # Token tier display
+│   │   ├── GatedFeature.tsx      # Feature gating wrapper
+│   │   ├── TaskMarketplace.tsx   # Task browser
 │   │   ├── GlitchOverlay.tsx     # Visual effects layer
-│   │   ├── HudPanel.tsx          # Protocol state display
 │   │   ├── ChatPanel.tsx         # Message history
 │   │   ├── VoiceButton.tsx       # Voice activation
 │   │   ├── TitleBar.tsx          # Custom window controls
 │   │   └── StatusBar.tsx         # System status
 │   ├── hooks/
 │   │   ├── useVoicePipeline.ts   # Grok Voice API integration
-│   │   └── useAppStore.ts        # Zustand state + appearance persistence
+│   │   ├── useAppStore.ts        # Zustand state + appearance persistence
+│   │   └── useMouthAnimation.ts  # Avatar mouth sync
 │   ├── types/
 │   │   └── index.ts              # TypeScript definitions
 │   ├── styles/
-│   │   └── globals.css           # Cyberpunk styling
+│   │   ├── globals.css           # Cyberpunk styling
+│   │   └── palette.ts            # Neon color palette
 │   ├── api/
 │   │   └── index.ts              # Tauri IPC layer
 │   ├── App.tsx                   # Main application
@@ -63,11 +89,37 @@ agenc-operator/
 │       │   ├── solana_exec.rs    # Solana transaction building
 │       │   ├── voice_local.rs    # Whisper offline ASR
 │       │   ├── policy_gate.rs    # Security confirmations
-│       │   └── types.rs          # Shared data structures
+│       │   ├── types.rs          # Shared data structures
+│       │   ├── transaction_retry.rs  # Robust tx submission
+│       │   ├── access/           # Access tier system
+│       │   │   ├── mod.rs
+│       │   │   ├── gate.rs       # Token-gated feature checks
+│       │   │   ├── checker.rs    # Balance verification
+│       │   │   └── types.rs      # Tier definitions
+│       │   ├── auth/             # Authentication
+│       │   │   ├── mod.rs
+│       │   │   └── twitter_oauth.rs  # Twitter OAuth flow
+│       │   ├── executor/         # Action executors
+│       │   │   ├── mod.rs
+│       │   │   ├── twitter.rs    # Tweet/thread posting
+│       │   │   ├── discord.rs    # Discord messages
+│       │   │   ├── github.rs     # Gists, issues, workflows
+│       │   │   ├── email.rs      # Email sending
+│       │   │   ├── image.rs      # Image generation
+│       │   │   ├── jupiter_swap.rs   # Token trading
+│       │   │   ├── grok_code.rs  # Code operations
+│       │   │   └── slack.rs      # Slack integration
+│       │   └── memory/           # Conversation memory
+│       │       ├── mod.rs
+│       │       ├── manager.rs    # Memory orchestration
+│       │       ├── store.rs      # Qdrant vector store
+│       │       ├── embeddings.rs # OpenAI embeddings
+│       │       └── types.rs      # Memory types
 │       └── Cargo.toml
 ├── public/
 │   └── models/
 │       └── avatar.glb            # 3D avatar model (user provided)
+├── docker-compose.yml            # Qdrant + services
 ├── package.json
 ├── vite.config.ts
 ├── tailwind.config.js
@@ -121,10 +173,40 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
+# Core
 VITE_XAI_API_KEY=your_xai_api_key_here
 VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
 VITE_SOLANA_NETWORK=devnet
 SOLANA_KEYPAIR_PATH=~/.config/solana/id.json
+
+# Access Tier (TETSUO token mint)
+TETSUO_MINT=your_tetsuo_token_mint_address
+
+# Twitter Integration
+TWITTER_CLIENT_ID=your_twitter_client_id
+TWITTER_CLIENT_SECRET=your_twitter_client_secret
+TWITTER_REDIRECT_URI=http://localhost:1420/auth/twitter/callback
+
+# Discord Integration
+DISCORD_BOT_TOKEN=your_discord_bot_token
+DISCORD_DEFAULT_SERVER_ID=your_server_id
+
+# GitHub Integration
+GITHUB_TOKEN=your_github_personal_access_token
+GITHUB_DEFAULT_OWNER=your_github_username
+GITHUB_DEFAULT_REPO=your_default_repo
+
+# Email (Resend)
+RESEND_API_KEY=your_resend_api_key
+EMAIL_FROM=noreply@yourdomain.com
+
+# Memory System (uses OpenAI for embeddings)
+QDRANT_URL=http://localhost:6333
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# Optional: Local Whisper fallback
+VITE_ENABLE_LOCAL_WHISPER=false
 ```
 
 ### 3. Add 3D Avatar Model (Optional)
@@ -240,15 +322,75 @@ loadPreset(presetId);
 
 Activate voice by clicking the center button or saying "Hey Tetsuo".
 
+### Task Management
+
 | Command | Action |
 |---------|--------|
 | "Create a task to audit the swap program with 0.5 SOL reward" | Create new task |
 | "List open tasks" | Show available tasks |
 | "Claim task 001" | Claim a task |
 | "Complete task 001" | Submit task completion |
+| "Cancel task 001" | Cancel your task |
+
+### Wallet & Protocol
+
+| Command | Action |
+|---------|--------|
 | "What's my balance?" | Check SOL balance |
 | "Get my address" | Show wallet address |
 | "Protocol status" | Show protocol stats |
+
+### Trading (Basic Tier)
+
+| Command | Action |
+|---------|--------|
+| "Swap 1 SOL for USDC" | Execute token swap via Jupiter |
+| "Get quote for 100 USDC to SOL" | Get swap quote |
+| "What's the price of BONK?" | Get token price |
+
+### Social (Pro Tier)
+
+| Command | Action |
+|---------|--------|
+| "Post tweet: Just shipped a new feature!" | Post to Twitter/X |
+| "Post thread about Solana development" | Post Twitter thread |
+| "Send Discord message to general: Hello!" | Post to Discord channel |
+
+### Code Operations (Pro Tier)
+
+| Command | Action |
+|---------|--------|
+| "Review the code in src/App.tsx" | Get code review |
+| "Fix the bug in utils.ts" | AI-assisted code fix |
+| "Generate a React component for user profile" | Generate code |
+| "Explain the solana_exec.rs file" | Code explanation |
+
+### GitHub (Pro Tier)
+
+| Command | Action |
+|---------|--------|
+| "Create a gist with my config file" | Create GitHub gist |
+| "Open issue: Fix memory leak in worker" | Create GitHub issue |
+| "Comment on issue 42: This is resolved" | Add issue comment |
+| "Trigger the deploy workflow" | Run GitHub Action |
+
+### Email (Pro Tier)
+
+| Command | Action |
+|---------|--------|
+| "Send email to team@example.com about the release" | Send single email |
+| "Send bulk email to newsletter subscribers" | Bulk email |
+
+### Image Generation (Pro Tier)
+
+| Command | Action |
+|---------|--------|
+| "Generate an image of a cyberpunk city" | AI image generation via Grok |
+
+### System
+
+| Command | Action |
+|---------|--------|
 | "Help" | List available commands |
 
 ## Security Model
@@ -392,9 +534,17 @@ cargo test --workspace
 | Done | Swappable 2D/3D avatar system |
 | Done | Appearance customization with presets |
 | Done | localStorage persistence |
+| Done | Token-gated access tiers (TETSUO) |
+| Done | Twitter OAuth + posting |
+| Done | Discord integration |
+| Done | GitHub operations (gists, issues, workflows) |
+| Done | Email sending (Resend) |
+| Done | Jupiter swap integration |
+| Done | Grok image generation |
+| Done | Memory system with Qdrant |
+| Done | Transaction retry with backoff |
 | Planned | Hardware wallet integration (Ledger) |
-| Planned | Multi language support |
-| Planned | Task marketplace browser |
+| Planned | Multi-language support |
 | Planned | Mobile companion app |
 | Planned | DAO governance integration |
 
