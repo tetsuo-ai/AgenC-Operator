@@ -1,10 +1,13 @@
 /**
  * ============================================================================
- * TetsuoAvatar3D - Three.js GLB Avatar with Appearance & Voice Reactivity
+ * TetsuoAvatar3D - Three.js GLB Avatar with Full Animation System
  * ============================================================================
  * Loads /models/avatar.glb and applies:
  *   1. Appearance customization (accent, hair, eye glow colors)
- *   2. Voice-driven subtle animations (speaking motion, eye pulse)
+ *   2. Comprehensive procedural animation system:
+ *      - Idle animations (breathing, sway, blinks)
+ *      - Talking animations (head movement, gestures)
+ *      - Facial expressions (lip sync, eyebrows, smiles)
  *
  * Material Mapping Strategy:
  *   Mesh/material names are matched via lowercase substring:
@@ -13,22 +16,56 @@
  *     "accent", "trim", "glow", "emissive" → accentColor
  *     Everything else → slight accent tint
  *
- * Voice Reactivity:
- *   status.mode === 'speaking' or 'listening' triggers:
- *     Head/torso subtle sway
- *     Eye emissive intensity pulse
- *     Slight scale breathing
+ * Animation Layers:
+ *   1. useIdleAnimation - Always-on subtle movements
+ *   2. useTalkingAnimation - Activated during speech
+ *   3. useExpressionSystem - Facial expressions layer
+ *   4. useMouthAnimation - Core lip sync driver
  * ============================================================================
  */
 
 import * as THREE from "three";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
-import { useEffect, useMemo, useRef } from "react";
+import { SkeletonUtils } from "three-stdlib";
+import { useEffect, useMemo, useRef, lazy, Suspense } from "react";
+
+// Lazy load post-processing to make it optional
+// Run `npm install @react-three/postprocessing postprocessing` to enable
+let EffectComposer: React.ComponentType<{ children: React.ReactNode }> | null = null;
+let Bloom: React.ComponentType<Record<string, unknown>> | null = null;
+let Vignette: React.ComponentType<Record<string, unknown>> | null = null;
+let SMAA: React.ComponentType | null = null;
+
+try {
+  // Dynamic import will fail gracefully if not installed
+  const postprocessing = require("@react-three/postprocessing");
+  EffectComposer = postprocessing.EffectComposer;
+  Bloom = postprocessing.Bloom;
+  Vignette = postprocessing.Vignette;
+  SMAA = postprocessing.SMAA;
+} catch {
+  console.warn("[TetsuoAvatar3D] @react-three/postprocessing not installed. Run: npm install @react-three/postprocessing postprocessing");
+}
 import type { AgentAppearance, AgentStatus } from "../../types";
 import { useMouthAnimation } from "../../hooks/useMouthAnimation";
+import { useGenesisAnimation } from "../../hooks/useGenesisAnimation";
+import { useExpressionSystem } from "../../hooks/useExpressionSystem";
+import { useIdleAnimation } from "../../hooks/useIdleAnimation";
+import { useTalkingAnimation } from "../../hooks/useTalkingAnimation";
+import { useCameraController } from "../../hooks/useCameraController";
+import { useAvatarStore } from "../../stores/avatarStore";
+import { DebugAPI } from "../../api";
 
-const MODEL_PATH = "/models/avatar.glb";
+// Logger that outputs to both console and Tauri terminal
+const log = {
+  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
+  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
+  warn: (msg: string) => { console.warn(msg); DebugAPI.warn(msg); },
+};
+
+const MODEL_PATH = "/models/agencfinalformr.glb";
+const DRACO_PATH = "/draco/";
 
 // ============================================================================
 // Configuration Constants (tweak these to adjust behavior)
@@ -40,16 +77,21 @@ const CONFIG = {
   EMISSIVE_BASE_INTENSITY: 0.6,   // Base eye glow intensity
   EMISSIVE_VOICE_BOOST: 0.8,      // Additional intensity when speaking
 
-  // Voice Reactivity
-  HEAD_SWAY_AMPLITUDE: 0.02,      // Radians of head rotation when speaking
-  HEAD_SWAY_SPEED: 3.0,           // Speed of head sway oscillation
-  SCALE_BREATH_AMPLITUDE: 0.008,  // Scale variation (subtle breathing)
-  SCALE_BREATH_SPEED: 2.0,        // Breathing speed
+  // Eye glow animation
   EYE_PULSE_SPEED: 4.0,           // Eye glow pulse speed when speaking
+  EYE_IDLE_PULSE_SPEED: 1.5,      // Slower pulse when idle
 
-  // Idle Animation
-  IDLE_SWAY_AMPLITUDE: 0.005,     // Very subtle idle movement
-  IDLE_SWAY_SPEED: 0.5,           // Slow idle oscillation
+  // Rendering
+  ENABLE_POST_PROCESSING: true,   // Enable bloom, vignette, etc.
+
+  // Post-processing settings
+  BLOOM_INTENSITY: 0.3,           // Subtle bloom for highlights
+  BLOOM_LUMINANCE_THRESHOLD: 0.8, // Only bright areas bloom
+  VIGNETTE_DARKNESS: 0.4,         // Edge darkening
+  VIGNETTE_OFFSET: 0.3,           // Vignette falloff
+
+  // Debug
+  DEBUG_ANIMATIONS: false,        // Log animation state (enable for troubleshooting)
 } as const;
 
 // ============================================================================
@@ -66,21 +108,56 @@ interface TetsuoAvatar3DProps {
 // Material Category Detection
 // ============================================================================
 
-type MaterialCategory = 'hair' | 'eye' | 'accent' | 'default';
+type MaterialCategory = 'skin' | 'hair' | 'eye' | 'mouth' | 'clothing' | 'accent' | 'default';
 
 function categorizeMesh(meshName: string, materialName: string): MaterialCategory {
   const name = `${meshName} ${materialName}`.toLowerCase();
 
-  if (name.includes('hair') || name.includes('strand') || name.includes('bangs')) {
-    return 'hair';
-  }
-  if (name.includes('eye') || name.includes('iris') || name.includes('pupil') || name.includes('cornea')) {
+  // Eye materials - Genesis 9 detailed eye system (check first to avoid matching 'eye' in 'eyelash')
+  if (name.includes('iris') || name.includes('pupil') || name.includes('cornea') ||
+      name.includes('sclera') || name.includes('moisture') || name.includes('refract') ||
+      name.includes('eye_') || name.includes('eye left') || name.includes('eye right') ||
+      name.includes('occlusion') || name.includes('tearline') || name.includes('tear')) {
     return 'eye';
   }
+
+  // Hair materials - Genesis 9 hair system
+  if (name.includes('hair') || name.includes('strand') || name.includes('bangs') ||
+      name.includes('scalp') || name.includes('nmixx')) {  // Model-specific hair
+    return 'hair';
+  }
+
+  // Mouth materials - separate for realistic rendering
+  if (name.includes('mouth') || name.includes('teeth') || name.includes('tongue') ||
+      name.includes('gum') || name.includes('cavity') || name.includes('lacrim')) {
+    return 'mouth';
+  }
+
+  // Clothing materials - Genesis 9 wardrobe
+  if (name.includes('shirt') || name.includes('pants') || name.includes('shorts') ||
+      name.includes('sock') || name.includes('shoe') || name.includes('tank') ||
+      name.includes('top') || name.includes('dress') || name.includes('jacket') ||
+      name.includes('cloth') || name.includes('fabric')) {
+    return 'clothing';
+  }
+
+  // Skin materials - Genesis 9 body (check after eye/hair/mouth to avoid overlap)
+  if (name.includes('skin') || name.includes('face') || name.includes('body') ||
+      name.includes('arm') || name.includes('leg') || name.includes('torso') ||
+      name.includes('head') || name.includes('neck') || name.includes('lip') ||
+      name.includes('nostril') || name.includes('ear') || name.includes('hand') ||
+      name.includes('foot') || name.includes('feet') || name.includes('finger') ||
+      name.includes('toe') || name.includes('nail') || name.includes('genesis') ||
+      name.includes('brow') || name.includes('lash')) {  // Eyebrows/lashes attached to skin
+    return 'skin';
+  }
+
+  // Accent materials - glow effects, cyberpunk elements
   if (name.includes('accent') || name.includes('trim') || name.includes('glow') ||
       name.includes('emissive') || name.includes('neon') || name.includes('circuit')) {
     return 'accent';
   }
+
   return 'default';
 }
 
@@ -139,19 +216,42 @@ function applyAppearance(
 
       // Apply colors based on category
       switch (category) {
+        case 'skin':
+          // Preserve original skin colors for realistic cinematic look
+          material.color.copy(originalColor);
+          // Subtle roughness adjustment for skin
+          material.roughness = Math.max(0.4, material.roughness);
+          material.metalness = 0;
+          break;
+
         case 'hair':
           // Blend original with hair color
           material.color.copy(originalColor).lerp(hairColor, intensity * 0.7);
           break;
 
         case 'eye':
-          // Eyes get emissive glow
+          // Eyes get emissive glow for cinematic effect
           material.emissive.copy(eyeGlowColor);
           material.emissiveIntensity = CONFIG.EMISSIVE_BASE_INTENSITY * intensity;
+          // Glossy eyes
+          material.roughness = 0.1;
+          material.metalness = 0;
+          break;
+
+        case 'mouth':
+          // Preserve mouth materials - realistic teeth/tongue
+          material.color.copy(originalColor);
+          material.roughness = 0.6;
+          material.metalness = 0;
+          break;
+
+        case 'clothing':
+          // Subtle accent tint on clothing
+          material.color.copy(originalColor).lerp(accentColor, intensity * 0.15);
           break;
 
         case 'accent':
-          // Accent parts get full accent color
+          // Accent parts get full accent color with glow
           material.color.copy(originalColor).lerp(accentColor, intensity * 0.8);
           material.emissive.copy(accentColor);
           material.emissiveIntensity = 0.3 * intensity;
@@ -170,48 +270,19 @@ function applyAppearance(
 }
 
 // ============================================================================
-// Update Voice Reactivity (called in useFrame)
+// Update Eye Glow (called in useFrame)
 // ============================================================================
 
-function updateVoiceReactivity(
-  group: THREE.Group,
+function updateEyeGlow(
   materialRefs: Map<string, MaterialRef>,
   status: AgentStatus,
   appearance: AgentAppearance,
   time: number
 ): void {
   const isActive = status.mode === 'speaking' || status.mode === 'listening';
-  const isSpeaking = status.mode === 'speaking';
   const intensity = appearance.effectsIntensity;
-
-  // Head/torso sway when active
-  if (isActive) {
-    const swayX = Math.sin(time * CONFIG.HEAD_SWAY_SPEED) * CONFIG.HEAD_SWAY_AMPLITUDE;
-    const swayY = Math.cos(time * CONFIG.HEAD_SWAY_SPEED * 0.7) * CONFIG.HEAD_SWAY_AMPLITUDE * 0.5;
-    group.rotation.x = swayX;
-    group.rotation.z = swayY;
-  } else {
-    // Subtle idle sway
-    const idleSwayX = Math.sin(time * CONFIG.IDLE_SWAY_SPEED) * CONFIG.IDLE_SWAY_AMPLITUDE;
-    group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, idleSwayX, 0.05);
-    group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, 0.05);
-  }
-
-  // Breathing scale
-  const breathScale = isActive
-    ? 1 + Math.sin(time * CONFIG.SCALE_BREATH_SPEED * 1.5) * CONFIG.SCALE_BREATH_AMPLITUDE * 1.5
-    : 1 + Math.sin(time * CONFIG.SCALE_BREATH_SPEED) * CONFIG.SCALE_BREATH_AMPLITUDE;
-  group.scale.setScalar(breathScale);
-
-  // Vertical motion when speaking
-  if (isSpeaking) {
-    group.position.y = Math.sin(time * 5) * 0.01;
-  } else {
-    group.position.y = THREE.MathUtils.lerp(group.position.y, 0, 0.1);
-  }
-
-  // Eye glow pulse when active
   const eyeGlowColor = new THREE.Color(appearance.eyeGlowColor);
+
   materialRefs.forEach((ref) => {
     if (ref.category === 'eye') {
       const baseIntensity = CONFIG.EMISSIVE_BASE_INTENSITY * intensity;
@@ -220,7 +291,7 @@ function updateVoiceReactivity(
         ref.material.emissiveIntensity = baseIntensity + pulse * CONFIG.EMISSIVE_VOICE_BOOST * intensity;
       } else {
         // Gentle idle pulse
-        const idlePulse = Math.sin(time * 1.5) * 0.1 + 0.9;
+        const idlePulse = Math.sin(time * CONFIG.EYE_IDLE_PULSE_SPEED) * 0.1 + 0.9;
         ref.material.emissiveIntensity = THREE.MathUtils.lerp(
           ref.material.emissiveIntensity,
           baseIntensity * idlePulse,
@@ -242,27 +313,78 @@ interface ReactiveModelProps {
 }
 
 function ReactiveModel({ appearance, status }: ReactiveModelProps) {
-  const gltf = useGLTF(MODEL_PATH);
+  const gltf = useGLTF(MODEL_PATH, DRACO_PATH);
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
-  const mouthInitializedRef = useRef(false);
+  const animationsInitializedRef = useRef(false);
 
-  // Mouth animation hook
-  // Set forceTest to 0.9 to verify rig works, then set back to -1
+  // ========================================
+  // Animation System
+  // ========================================
+
+  // MouthDriver for audio amplitude (lip sync source)
   const mouthAnimation = useMouthAnimation({
-    debug: true,
-    forceTest: -1, // Change to 0.9 to test if mouth opens
+    debug: false,
+    forceTest: -1,
+    useJawBone: true,  // Drive jaw bone directly from mouth animation
+    jawBoneContribution: 0.5,     // Half contribution for natural look
+    maxJawRotation: 0.3,          // ~17 degrees - natural jaw range
+    jawRotationDirection: -1,     // Genesis 9: negative X opens jaw
   });
 
-  // Clone scene once to avoid mutating the cached original
+  // Genesis 9 animation system - T-pose correction + eye reset only
+  // Jaw is handled by useMouthAnimation (above)
+  // Breathing/blinking by useIdleAnimation, head nod by useTalkingAnimation
+  const genesisAnimation = useGenesisAnimation({
+    breathSpeed: 0.6,
+    breathAmount: 0.02,
+    blinkIntervalMin: 2.5,
+    blinkIntervalMax: 5.0,
+    blinkDuration: 0.15,
+    headNodAmount: 0.015,
+    jawOpenAmount: 0,         // DISABLED - jaw handled by useMouthAnimation
+    enableBreathing: false,   // Handled by useIdleAnimation
+    enableBlinking: false,    // Handled by useIdleAnimation
+    enableHeadNod: false,     // Handled by useTalkingAnimation
+  });
+
+  // Facial expression system (smile, eyebrows, eye expressions)
+  // mouthOpenMultiplier: 0 because mouth is handled by useMouthAnimation
+  const expressionSystem = useExpressionSystem({
+    mouthOpenMultiplier: 0,
+    smileChancePerMinute: 8,
+    smileDuration: 2.0,
+    smileIntensity: 0.4,
+    browEmphasisAmount: 0.3,
+    eyeWidenOnEmphasis: 0.15,
+    happyEyesDuringSpeech: 0.1,
+  });
+
+  // Idle animation system (breathing, body sway, micro-movements, blinking)
+  // Uses defaults from useIdleAnimation - no overrides needed
+  const idleAnimation = useIdleAnimation();
+
+  // Talking animation system (head nods, hand gestures, shoulder shrugs)
+  const talkingAnimation = useTalkingAnimation();
+
+  // ========================================
+  // Scene Setup
+  // ========================================
+
+  // Clone scene using SkeletonUtils to properly rebind skeleton bones.
+  // Standard clone(true) breaks SkinnedMesh: cloned meshes still reference
+  // the ORIGINAL bones, so bone rotations have no visual effect.
   const clonedScene = useMemo(() => {
-    const clone = gltf.scene.clone(true);
+    // SkeletonUtils.clone properly rebinds skeleton bones to the cloned scene.
+    // Standard clone(true) leaves SkinnedMesh referencing original bones.
+    const clone = SkeletonUtils.clone(gltf.scene);
     clone.updateMatrixWorld(true);
     return clone;
   }, [gltf.scene]);
 
-  // Compute bounding box for centering
+  // Compute offset to center the model at origin
+  // Victoria 9 model: position so feet are at Y=0 and model is centered horizontally
   const modelOffset = useMemo(() => {
     const box = new THREE.Box3().setFromObject(clonedScene);
     const center = new THREE.Vector3();
@@ -270,18 +392,107 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     box.getCenter(center);
     box.getSize(size);
 
-    console.log("[TetsuoAvatar3D] Model size:", size, "center:", center);
+    log.info(`[TetsuoAvatar3D] Model loaded - size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)}), center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`);
+    log.info(`[TetsuoAvatar3D] Model bounds: Y from ${box.min.y.toFixed(2)} to ${box.max.y.toFixed(2)}`);
 
-    return center.multiplyScalar(-1);
+    // Position model so feet are at Y=0
+    // This allows camera presets to work with consistent world coordinates
+    // Horizontal centering keeps model in frame
+    return new THREE.Vector3(-center.x, -box.min.y, -center.z);
   }, [clonedScene]);
 
-  // Initialize mouth animation after scene is ready
+  // ========================================
+  // Initialize Animation Systems
+  // ========================================
+
   useEffect(() => {
-    if (!mouthInitializedRef.current && clonedScene) {
+    if (!animationsInitializedRef.current && clonedScene) {
+      log.info("[TetsuoAvatar3D] ╔════════════════════════════════════════════╗");
+      log.info("[TetsuoAvatar3D] ║     GENESIS 9 ANIMATION INITIALIZATION    ║");
+      log.info("[TetsuoAvatar3D] ╚════════════════════════════════════════════╝");
+
+      // Initialize MouthDriver (for audio amplitude)
+      log.info("[TetsuoAvatar3D] Initializing MouthDriver...");
       mouthAnimation.initialize(clonedScene);
-      mouthInitializedRef.current = true;
+
+      // Initialize unified Genesis animation system
+      log.info("[TetsuoAvatar3D] Initializing GenesisAnimation...");
+      genesisAnimation.initialize(clonedScene);
+
+      // Initialize facial expression system (smile, eyebrows, eyes)
+      log.info("[TetsuoAvatar3D] Initializing ExpressionSystem...");
+      expressionSystem.initialize(clonedScene);
+
+      // Initialize idle animation (breathing, sway, micro-movements, blinking)
+      // Must be AFTER genesisAnimation so it captures corrected T-pose rest poses
+      log.info("[TetsuoAvatar3D] Initializing IdleAnimation...");
+      idleAnimation.initialize(clonedScene);
+
+      // Initialize talking animation (head nods, gestures, shrugs)
+      log.info("[TetsuoAvatar3D] Initializing TalkingAnimation...");
+      talkingAnimation.initialize(clonedScene);
+
+      animationsInitializedRef.current = true;
+
+      // Expose rig API for external control (console, demos)
+      const rigAPI = {
+        // Trigger a blink
+        blink: () => {
+          log.info("[RigAPI] Triggering blink");
+          genesisAnimation.triggerBlink();
+        },
+
+        // Get current mouth open value
+        getMouthOpen: () => mouthAnimation.getState?.().mouthOpen ?? 0,
+
+        // Get blink value
+        getBlinkValue: () => genesisAnimation.getBlinkValue(),
+
+        // Get combined state
+        getState: () => ({
+          mouthOpen: mouthAnimation.getState?.().mouthOpen ?? 0,
+          blinkValue: genesisAnimation.getBlinkValue(),
+          isInitialized: animationsInitializedRef.current,
+        }),
+
+        // Expression triggers
+        triggerSmile: () => {
+          log.info("[RigAPI] Triggering smile");
+          expressionSystem.triggerExpression('happy', 2.0);
+        },
+        triggerThinking: () => {
+          log.info("[RigAPI] Triggering thinking expression");
+          expressionSystem.triggerExpression('thinking', 1.5);
+        },
+        triggerEmphasis: () => {
+          log.info("[RigAPI] Triggering emphasis expression");
+          expressionSystem.triggerExpression('emphasis', 0.5);
+        },
+
+        // Help
+        help: () => {
+          console.log(`
+╔════════════════════════════════════════════════════════╗
+║                    RIG API HELP                        ║
+╠════════════════════════════════════════════════════════╣
+║  rig.blink()             - Trigger a blink             ║
+║  rig.getMouthOpen()      - Get mouth open value (0-1)  ║
+║  rig.getBlinkValue()     - Get blink value (0-1)       ║
+║  rig.getState()          - Get combined animation state║
+║  rig.triggerSmile()      - Trigger a smile (2s)        ║
+║  rig.triggerThinking()   - Trigger thinking face (1.5s)║
+║  rig.triggerEmphasis()   - Trigger emphasis (0.5s)     ║
+║  rig.help()              - Show this help              ║
+╚════════════════════════════════════════════════════════╝
+          `);
+        },
+      };
+
+      // Expose to window
+      (window as unknown as { rig: typeof rigAPI }).rig = rigAPI;
+      log.info("[TetsuoAvatar3D] Rig API exposed to window.rig - try rig.help() in console");
     }
-  }, [clonedScene, mouthAnimation]);
+  }, [clonedScene, mouthAnimation, genesisAnimation, expressionSystem, idleAnimation, talkingAnimation]);
 
   // Apply appearance whenever it changes
   useEffect(() => {
@@ -290,8 +501,10 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
 
   // Log material categories on first load (debug)
   useEffect(() => {
+    if (!CONFIG.DEBUG_ANIMATIONS) return;
+
     const categories: Record<MaterialCategory, string[]> = {
-      hair: [], eye: [], accent: [], default: []
+      skin: [], hair: [], eye: [], mouth: [], clothing: [], accent: [], default: []
     };
 
     clonedScene.traverse((child) => {
@@ -304,25 +517,72 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       }
     });
 
-    console.log("[TetsuoAvatar3D] Material categories:", categories);
+    log.debug("[TetsuoAvatar3D] Material categories:");
+    log.debug(`  Skin: ${categories.skin.length} materials`);
+    log.debug(`  Hair: ${categories.hair.length} materials`);
+    log.debug(`  Eye: ${categories.eye.length} materials`);
+    log.debug(`  Mouth: ${categories.mouth.length} materials`);
+    log.debug(`  Clothing: ${categories.clothing.length} materials`);
+    log.debug(`  Accent: ${categories.accent.length} materials`);
+    log.debug(`  Default: ${categories.default.length} materials`);
   }, [clonedScene]);
 
-  // Animation loop
+  // ========================================
+  // Animation Loop
+  // ========================================
+
+  const eyeBonesRef = useRef<{ eyeL: THREE.Bone | null; eyeR: THREE.Bone | null }>({ eyeL: null, eyeR: null });
+  const eyeBonesSearched = useRef(false);
+
   useFrame((_, delta) => {
     timeRef.current += delta;
+    const isSpeaking = status.mode === 'speaking';
 
-    if (groupRef.current) {
-      updateVoiceReactivity(
-        groupRef.current,
-        materialRefsRef.current,
-        status,
-        appearance,
-        timeRef.current
-      );
-    }
+    // Update eye glow based on voice state
+    updateEyeGlow(
+      materialRefsRef.current,
+      status,
+      appearance,
+      timeRef.current
+    );
 
-    // Apply mouth animation driven by audio amplitude
+    // Get mouth open value from MouthDriver (audio amplitude)
+    const mouthOpen = mouthAnimation.getState?.().mouthOpen ?? 0;
+
+    // Apply morph target mouth animation (lip shapes)
     mouthAnimation.applyMouthAnimation();
+
+    // Genesis animation system (T-pose correction applied at init)
+    genesisAnimation.update(delta, isSpeaking, mouthOpen);
+
+    // Facial expressions (smile, eyebrows, eye widening)
+    expressionSystem.update(delta, isSpeaking);
+
+    // Idle animations (breathing, body sway, micro-movements, blinking)
+    idleAnimation.update(delta);
+
+    // Talking animations (head nods, hand gestures, shoulder shrugs)
+    talkingAnimation.update(delta, isSpeaking);
+
+    // Force eye bones to look forward every frame
+    if (!eyeBonesSearched.current) {
+      eyeBonesSearched.current = true;
+      clonedScene.traverse((child) => {
+        if (child instanceof THREE.Bone) {
+          if (child.name.toLowerCase() === 'l_eye') eyeBonesRef.current.eyeL = child;
+          if (child.name.toLowerCase() === 'r_eye') eyeBonesRef.current.eyeR = child;
+        }
+      });
+    }
+    if (eyeBonesRef.current.eyeL) eyeBonesRef.current.eyeL.rotation.set(-0.1, 0, 0);
+    if (eyeBonesRef.current.eyeR) eyeBonesRef.current.eyeR.rotation.set(-0.1, 0, 0);
+
+    // Force skeleton recalculation after all bone modifications
+    clonedScene.traverse((obj) => {
+      if ((obj as THREE.SkinnedMesh).isSkinnedMesh) {
+        (obj as THREE.SkinnedMesh).skeleton.update();
+      }
+    });
   });
 
   return (
@@ -330,6 +590,21 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       <primitive object={clonedScene} />
     </group>
   );
+}
+
+// ============================================================================
+// Camera Controller Component
+// ============================================================================
+
+function CameraController() {
+  useCameraController({
+    damping: 0.08,
+    fovDamping: 0.06,
+    onArrival: () => {
+      log.debug("[CameraController] Camera arrived at target position");
+    },
+  });
+  return null;
 }
 
 // ============================================================================
@@ -341,38 +616,97 @@ export default function TetsuoAvatar3D({
   status,
   onLoadError,
 }: TetsuoAvatar3DProps) {
+  // Get initial camera preset from store
+  const initialPreset = useAvatarStore((state) => state.currentPreset);
+  const isTransitioning = useAvatarStore((state) => state.isTransitioning);
+  const orbitEnabled = useAvatarStore((state) => state.orbitEnabled);
+
   return (
     <div style={{ width: 420, height: 520 }}>
       <Canvas
-        camera={{ position: [0, 1.2, 3], fov: 45 }}
+        camera={{
+          position: initialPreset.position,
+          fov: initialPreset.fov,
+          near: 1,
+          far: 1000,
+        }}
         onError={() => onLoadError?.()}
         frameloop="always"
-        dpr={[1, 1.5]}
+        dpr={[1, 2]}
+        gl={{
+          antialias: true,
+          toneMapping: THREE.NeutralToneMapping,
+          toneMappingExposure: 1.05,
+          outputColorSpace: THREE.SRGBColorSpace,
+        }}
       >
-        {/* Lighting */}
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[5, 8, 5]} intensity={1.0} />
-        <directionalLight position={[-5, 4, -5]} intensity={0.5} />
+        {/* Camera controller for smooth transitions */}
+        <CameraController />
 
-        {/* Accent-colored rim light */}
-        <pointLight
-          position={[0, 2, -2]}
-          intensity={appearance.effectsIntensity * 2}
-          color={appearance.accentColor}
-          distance={5}
+        {/* ============ WARM LIGHTING SETUP ============ */}
+
+        {/* Key Light - Warm, softer for natural skin tones */}
+        <directionalLight
+          position={[80, 180, 120]}
+          intensity={0.8}
+          color="#fff5e6"
         />
 
-        {/* Environment for PBR reflections */}
-        <Environment preset="city" />
+        {/* Fill Light - Warm, subtle */}
+        <directionalLight
+          position={[-80, 120, 80]}
+          intensity={0.3}
+          color="#fff8f0"
+        />
+
+        {/* Rim Light - Warm edge definition */}
+        <directionalLight
+          position={[0, 140, -80]}
+          intensity={0.25}
+          color="#ffe8d6"
+        />
+
+        {/* Ambient fill */}
+        <ambientLight intensity={0.3} />
+
+        {/* City Environment for warm, natural reflections */}
+        <Environment preset="city" background={false} />
 
         {/* The reactive model */}
         <ReactiveModel appearance={appearance} status={status} />
 
-        {/* Debug grid (remove in production) */}
-        <gridHelper args={[10, 10, "#333", "#222"]} position={[0, -1.5, 0]} />
+        {/* ============ POST-PROCESSING EFFECTS ============ */}
+        {CONFIG.ENABLE_POST_PROCESSING && EffectComposer && Bloom && Vignette && SMAA && (
+          <EffectComposer>
+            {/* Subtle bloom for highlights and eye glow */}
+            <Bloom
+              intensity={CONFIG.BLOOM_INTENSITY}
+              luminanceThreshold={CONFIG.BLOOM_LUMINANCE_THRESHOLD}
+              luminanceSmoothing={0.9}
+              mipmapBlur
+            />
+            {/* Cinematic vignette */}
+            <Vignette
+              darkness={CONFIG.VIGNETTE_DARKNESS}
+              offset={CONFIG.VIGNETTE_OFFSET}
+            />
+            {/* Anti-aliasing */}
+            <SMAA />
+          </EffectComposer>
+        )}
 
-        {/* Orbit controls for inspection */}
-        <OrbitControls enablePan={false} />
+        {/* Orbit controls - enabled only in orbit mode */}
+        <OrbitControls
+          enablePan={orbitEnabled}
+          enableZoom={orbitEnabled}
+          enableRotate={orbitEnabled}
+          target={initialPreset.target}
+          enabled={orbitEnabled && !isTransitioning}
+          minDistance={30}
+          maxDistance={500}
+          minPolarAngle={Math.PI * 0.1}
+          maxPolarAngle={Math.PI * 0.9}
+        />
       </Canvas>
     </div>
   );
@@ -384,8 +718,9 @@ export default function TetsuoAvatar3D({
 
 export function preloadModel() {
   try {
-    useGLTF.preload(MODEL_PATH);
+    log.info("[TetsuoAvatar3D] Preloading model with Draco: " + MODEL_PATH);
+    useGLTF.preload(MODEL_PATH, DRACO_PATH);
   } catch (e) {
-    console.warn("[TetsuoAvatar3D] Failed to preload model:", e);
+    log.warn("[TetsuoAvatar3D] Failed to preload model: " + e);
   }
 }
