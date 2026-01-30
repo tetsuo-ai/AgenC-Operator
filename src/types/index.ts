@@ -502,3 +502,21 @@ export const DEFAULT_APPEARANCE: AgentAppearance = {
   },
   effectsIntensity: 0.7,
 };
+
+// ============================================================================
+// Camera System Types
+// ============================================================================
+
+/**
+ * Camera modes for different framing of the avatar.
+ */
+export type CameraMode = 'closeup' | 'waist' | 'full-body' | 'presentation' | 'custom';
+
+/**
+ * Camera preset configuration with position, target, and field of view.
+ */
+export interface CameraPreset {
+  position: [number, number, number];
+  target: [number, number, number];
+  fov: number;
+}

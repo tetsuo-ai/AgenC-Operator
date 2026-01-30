@@ -35,7 +35,8 @@ const SAMPLE_RATE = 24000;
 const MAX_AUDIO_QUEUE_SIZE = 200; // Cap buffered chunks to prevent unbounded memory growth
 
 // Debug flag - set to true to see WebSocket messages
-const DEBUG_WS = true;
+// WARNING: Keep false in production to avoid leaking session details in logs
+const DEBUG_WS = false;
 
 const TETSUO_SYSTEM_PROMPT = `You are Tetsuo, a cyberpunk AI operator for the AgenC protocol on Solana.
 You help users manage tasks on the blockchain, trade tokens, write code, and post to social media.
