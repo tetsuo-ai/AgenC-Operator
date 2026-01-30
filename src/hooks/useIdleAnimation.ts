@@ -331,21 +331,9 @@ export function useIdleAnimation(
       if (botLRest) log.info(`[IdleAnimation] Raw eyelid rest - botL x=${botLRest.x.toFixed(4)}`);
       if (botRRest) log.info(`[IdleAnimation] Raw eyelid rest - botR x=${botRRest.x.toFixed(4)}`);
 
-      // Normalize eyelid rest poses - Genesis 9 models often have asymmetric
-      // eyelid rest rotations, causing one eye to appear more open than the other.
-      // Average left/right to ensure symmetric blinks.
-      if (topLRest && topRRest) {
-        const avgTopX = (topLRest.x + topRRest.x) / 2;
-        topLRest.x = avgTopX;
-        topRRest.x = avgTopX;
-        log.info(`[IdleAnimation] Normalized upper eyelid rest X to ${avgTopX.toFixed(4)}`);
-      }
-      if (botLRest && botRRest) {
-        const avgBotX = (botLRest.x + botRRest.x) / 2;
-        botLRest.x = avgBotX;
-        botRRest.x = avgBotX;
-        log.info(`[IdleAnimation] Normalized lower eyelid rest X to ${avgBotX.toFixed(4)}`);
-      }
+      // NOTE: Do NOT normalize/average eyelid rest poses. Genesis 9 uses mirrored
+      // bone coordinate systems, so left/right naturally have different rotation
+      // values for the same visual position. Averaging breaks the right eye blink.
     }
 
     log.info(`[IdleAnimation] Ready: ${Object.keys(bones).length} bones, blink: ${morphRef.current ? 'yes' : 'no'}`);
