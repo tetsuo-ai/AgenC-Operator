@@ -126,6 +126,16 @@ interface AppState {
   isCustomizeOpen: boolean;
   setIsCustomizeOpen: (open: boolean) => void;
   toggleCustomize: () => void;
+
+  // HUD Panel State
+  isHudOpen: boolean;
+  setIsHudOpen: (open: boolean) => void;
+  toggleHud: () => void;
+
+  // Task Marketplace State
+  isMarketplaceOpen: boolean;
+  setIsMarketplaceOpen: (open: boolean) => void;
+  toggleMarketplace: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -218,6 +228,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   isCustomizeOpen: false,
   setIsCustomizeOpen: (isCustomizeOpen) => set({ isCustomizeOpen }),
   toggleCustomize: () => set((state) => ({ isCustomizeOpen: !state.isCustomizeOpen })),
+
+  // HUD Panel State
+  isHudOpen: false,
+  setIsHudOpen: (isHudOpen) => set({ isHudOpen }),
+  toggleHud: () => set((state) => ({ isHudOpen: !state.isHudOpen })),
+
+  // Task Marketplace State
+  isMarketplaceOpen: false,
+  setIsMarketplaceOpen: (isMarketplaceOpen) => set({ isMarketplaceOpen }),
+  toggleMarketplace: () => set((state) => ({ isMarketplaceOpen: !state.isMarketplaceOpen })),
 }));
 
 // ============================================================================
@@ -232,3 +252,5 @@ export const useMessages = () => useAppStore((state) => state.messages);
 export const useAppearance = () => useAppStore((state) => state.appearance);
 export const usePresets = () => useAppStore((state) => state.presets);
 export const useIsCustomizeOpen = () => useAppStore((state) => state.isCustomizeOpen);
+export const useIsHudOpen = () => useAppStore((state) => state.isHudOpen);
+export const useIsMarketplaceOpen = () => useAppStore((state) => state.isMarketplaceOpen);
