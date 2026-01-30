@@ -24,9 +24,10 @@ import WalletDropdown from './components/WalletDropdown';
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
 import { useAppStore } from './hooks/useAppStore';
+import { useAvatarStore, CAMERA_PRESETS } from './stores/avatarStore';
 
 // Types
-import type { VoiceState, WalletInfo, ProtocolState, AgentStatus } from './types';
+import type { VoiceState, WalletInfo, ProtocolState, AgentStatus, CameraMode } from './types';
 
 // ============================================================================
 // Constants
@@ -64,6 +65,24 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Camera state
+  const currentCameraMode = useAvatarStore((s) => s.currentMode);
+  const setCameraMode = useAvatarStore((s) => s.setCameraMode);
+
+  const CAMERA_MODES: { mode: CameraMode; label: string }[] = [
+    { mode: 'closeup', label: 'Close-Up' },
+    { mode: 'waist', label: 'Waist' },
+    { mode: 'full-body', label: 'Full Body' },
+    { mode: 'presentation', label: '3/4 View' },
+  ];
+
+  const cycleCameraMode = useCallback(() => {
+    const modes: CameraMode[] = ['closeup', 'waist', 'full-body', 'presentation'];
+    const currentIdx = modes.indexOf(currentCameraMode);
+    const nextIdx = (currentIdx + 1) % modes.length;
+    setCameraMode(modes[nextIdx]);
+  }, [currentCameraMode, setCameraMode]);
+
   // ============================================================================
   // Derive AgentStatus from App State
   // ============================================================================
@@ -88,9 +107,10 @@ function App() {
     };
   }, [voiceState, wallet, protocolState, messages]);
 
-  // Refs for polling intervals
+  // Refs for polling intervals and init guard
   const hudPollRef = useRef<NodeJS.Timeout | null>(null);
   const walletPollRef = useRef<NodeJS.Timeout | null>(null);
+  const initializedRef = useRef(false);
 
   // ============================================================================
   // Voice Pipeline Hook
@@ -185,6 +205,9 @@ function App() {
   // ============================================================================
 
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
     console.log('[App] Initializing...');
 
     // Add welcome message immediately
@@ -193,6 +216,12 @@ function App() {
       role: 'tetsuo',
       content: 'Systems online. I am Tetsuo, your AgenC operator. Click the voice button or say "Hey Tetsuo" to begin.',
       timestamp: Date.now(),
+    });
+
+    // Initialize memory system (non-blocking, fire-and-forget)
+    TetsuoAPI.memory.initialize().then((ok) => {
+      if (ok) console.log('[Init] Memory system initialized');
+      else console.warn('[Init] Memory system unavailable');
     });
 
     // Fetch initial data with callbacks (non-blocking)
@@ -226,14 +255,8 @@ function App() {
       if (walletPollRef.current) clearInterval(walletPollRef.current);
       clearInterval(bgRefreshInterval);
     };
-  }, [
-    addMessage,
-    setWallet,
-    setProtocolState,
-    pollProtocolStateNonBlocking,
-    pollWalletNonBlocking,
-    triggerBackgroundRefresh,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ============================================================================
   // Voice Control
@@ -274,8 +297,29 @@ function App() {
       {/* Custom Title Bar */}
       <TitleBar />
 
-      {/* Wallet Dropdown - Top Right */}
-      <div className="absolute top-12 right-4 z-50">
+      {/* Top Bar - Camera, Appearance & Wallet Dropdowns */}
+      <div className="absolute top-12 right-4 z-50 flex items-center gap-3">
+        {/* Camera Cycle Button */}
+        <button
+          onClick={cycleCameraMode}
+          className="flex items-center gap-2 px-3 py-2 rounded border bg-cyber-dark/80 border-cyber-light text-holo-silver hover:border-neon-cyan hover:text-neon-cyan transition-all"
+          aria-label="Cycle camera view"
+          title={`Camera: ${CAMERA_MODES.find(m => m.mode === currentCameraMode)?.label}`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          <span className="text-xs font-display uppercase tracking-wider">
+            {CAMERA_MODES.find(m => m.mode === currentCameraMode)?.label}
+          </span>
+        </button>
+        {/* Appearance Dropdown */}
+        <AppearanceMenu
+          isOpen={isCustomizeOpen}
+          onClose={() => setIsCustomizeOpen(false)}
+          onToggle={toggleCustomize}
+        />
+        {/* Wallet Dropdown */}
         <WalletDropdown wallet={wallet} />
       </div>
 
@@ -289,8 +333,6 @@ function App() {
           <TetsuoAvatar
             appearance={appearance}
             status={agentStatus}
-            onToggleCustomize={toggleCustomize}
-            isCustomizeOpen={isCustomizeOpen}
           />
 
           {/* Voice Button - Overlaid at bottom center */}
@@ -301,12 +343,6 @@ function App() {
               onClick={handleVoiceToggle}
             />
           </div>
-
-          {/* Appearance Customization Menu */}
-          <AppearanceMenu
-            isOpen={isCustomizeOpen}
-            onClose={() => setIsCustomizeOpen(false)}
-          />
         </div>
 
         {/* Right Panel - Chat */}
@@ -324,6 +360,7 @@ function App() {
         voiceState={voiceState}
         isConnected={isVoiceConnected}
         error={error}
+        network={agentStatus.network.toUpperCase()}
       />
 
       {/* Vignette Effect */}

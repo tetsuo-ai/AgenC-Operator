@@ -97,6 +97,36 @@ export interface UseMouthAnimationReturn {
 }
 
 // ============================================================================
+// Lip Bone References (Genesis 9 facial rig)
+// ============================================================================
+
+interface LipBoneRefs {
+  centerUpper?: THREE.Bone;
+  centerLower?: THREE.Bone;
+  upperL?: THREE.Bone;
+  upperR?: THREE.Bone;
+  lowerL?: THREE.Bone;
+  lowerR?: THREE.Bone;
+  cornerL?: THREE.Bone;
+  cornerR?: THREE.Bone;
+}
+
+interface LipBoneRestPoses {
+  [key: string]: THREE.Euler;
+}
+
+const LIP_BONE_PATTERNS: Record<keyof LipBoneRefs, RegExp[]> = {
+  centerUpper: [/^center_lipupper$/i, /^centerlipupper$/i, /^mid_lipupper$/i],
+  centerLower: [/^center_liplower$/i, /^centerliplower$/i, /^mid_liplower$/i],
+  upperL: [/^l_lipupper$/i, /^lipUpperL$/i],
+  upperR: [/^r_lipupper$/i, /^lipUpperR$/i],
+  lowerL: [/^l_liplower$/i, /^lipLowerL$/i],
+  lowerR: [/^r_liplower$/i, /^lipLowerR$/i],
+  cornerL: [/^l_lipcorner$/i, /^lipCornerL$/i],
+  cornerR: [/^r_lipcorner$/i, /^lipCornerR$/i],
+};
+
+// ============================================================================
 // Hook Implementation
 // ============================================================================
 
@@ -111,6 +141,12 @@ export function useMouthAnimation(
   const jawRestRotationRef = useRef<THREE.Euler | null>(null);
   const useMorphTargetsRef = useRef<boolean>(false);
   const initializedRef = useRef<boolean>(false);
+  // Secondary smoothing for more natural mouth movement
+  const smoothedMouthRef = useRef<number>(0);
+  const prevMouthRef = useRef<number>(0);
+  // Lip bone refs for Genesis 9 facial rig
+  const lipBonesRef = useRef<LipBoneRefs>({});
+  const lipRestPosesRef = useRef<LipBoneRestPoses>({});
 
   // Get or create the global audio context and mouth driver
   const getAudioContext = useCallback((): AudioContext => {
@@ -180,6 +216,36 @@ export function useMouthAnimation(
       }
     }
 
+    // ======================================================================
+    // Discover lip bones for Genesis 9 facial rig
+    // ======================================================================
+    const lipBones: LipBoneRefs = {};
+    const foundLipBones: string[] = [];
+
+    scene.traverse((child) => {
+      if (!(child instanceof THREE.Bone)) return;
+      for (const [slot, patterns] of Object.entries(LIP_BONE_PATTERNS)) {
+        if (lipBones[slot as keyof LipBoneRefs]) continue; // already found
+        for (const pattern of patterns) {
+          if (pattern.test(child.name)) {
+            lipBones[slot as keyof LipBoneRefs] = child;
+            lipRestPosesRef.current[slot] = child.rotation.clone();
+            foundLipBones.push(`${slot} -> "${child.name}"`);
+            break;
+          }
+        }
+      }
+    });
+
+    lipBonesRef.current = lipBones;
+
+    if (foundLipBones.length > 0) {
+      log.info(`[MouthAnimation] Found ${foundLipBones.length} lip bones:`);
+      foundLipBones.forEach(b => log.info(`[MouthAnimation]   + ${b}`));
+    } else {
+      log.warn('[MouthAnimation] No lip bones found - lip deformation disabled');
+    }
+
     // Ensure driver is initialized
     getMouthDriver();
 
@@ -230,11 +296,23 @@ export function useMouthAnimation(
       log.debug(`[MouthAnimation] mouthOpen=${mouthOpen.toFixed(3)} hasMorph=${hasMorph} hasJaw=${hasJaw} jawX=${jawRotation?.x?.toFixed(4) ?? 'N/A'}`);
     }
 
+    // Secondary smoothing: lerp toward target for more natural, flowing movement
+    const prev = smoothedMouthRef.current;
+    const lerpSpeed = mouthOpen > prev ? 0.4 : 0.25; // faster open, gentler close
+    const smoothed = prev + (mouthOpen - prev) * lerpSpeed;
+    smoothedMouthRef.current = smoothed;
+
+    // Velocity-based micro-variation: add subtle wobble when mouth is moving
+    const velocity = Math.abs(smoothed - prevMouthRef.current);
+    prevMouthRef.current = smoothed;
+    const microVariation = velocity > 0.005 ? Math.sin(Date.now() * 0.02) * 0.02 * velocity * 10 : 0;
+    const finalMouth = Math.min(1, Math.max(0, smoothed + microVariation));
+
     // Apply to morph target if available
     if (useMorphTargetsRef.current && morphTargetRef.current) {
       const { mesh, index } = morphTargetRef.current;
       if (mesh.morphTargetInfluences) {
-        mesh.morphTargetInfluences[index] = mouthOpen;
+        mesh.morphTargetInfluences[index] = finalMouth;
       }
     }
 
@@ -249,7 +327,7 @@ export function useMouthAnimation(
         : 1.0;
 
       if (jawContribution > 0) {
-        const rotation = mouthOpen * cfg.maxJawRotation * cfg.jawRotationDirection * jawContribution;
+        const rotation = finalMouth * cfg.maxJawRotation * cfg.jawRotationDirection * jawContribution;
 
         // Apply rotation on the configured axis
         switch (cfg.jawRotationAxis) {
@@ -265,6 +343,47 @@ export function useMouthAnimation(
         }
       }
     }
+
+    // ======================================================================
+    // Apply lip bone animation (Genesis 9 facial rig)
+    // ======================================================================
+    const lips = lipBonesRef.current;
+    const lipRest = lipRestPosesRef.current;
+
+    if (Object.keys(lips).length > 0) {
+      // Lower lip follows jaw opening (rotate downward = positive X)
+      const lipLowerAmount = finalMouth * 0.08;
+      if (lips.centerLower && lipRest.centerLower) {
+        lips.centerLower.rotation.x = lipRest.centerLower.x + lipLowerAmount;
+      }
+      if (lips.lowerL && lipRest.lowerL) {
+        lips.lowerL.rotation.x = lipRest.lowerL.x + lipLowerAmount * 0.7;
+      }
+      if (lips.lowerR && lipRest.lowerR) {
+        lips.lowerR.rotation.x = lipRest.lowerR.x + lipLowerAmount * 0.7;
+      }
+
+      // Upper lip lifts slightly during speech (negative X = upward)
+      const lipUpperAmount = finalMouth * 0.03;
+      if (lips.centerUpper && lipRest.centerUpper) {
+        lips.centerUpper.rotation.x = lipRest.centerUpper.x - lipUpperAmount;
+      }
+      if (lips.upperL && lipRest.upperL) {
+        lips.upperL.rotation.x = lipRest.upperL.x - lipUpperAmount * 0.6;
+      }
+      if (lips.upperR && lipRest.upperR) {
+        lips.upperR.rotation.x = lipRest.upperR.x - lipUpperAmount * 0.6;
+      }
+
+      // Lip corners spread slightly when mouth opens wide (positive Z = outward)
+      const lipCornerAmount = finalMouth * 0.04;
+      if (lips.cornerL && lipRest.cornerL) {
+        lips.cornerL.rotation.z = lipRest.cornerL.z + lipCornerAmount;
+      }
+      if (lips.cornerR && lipRest.cornerR) {
+        lips.cornerR.rotation.z = lipRest.cornerR.z - lipCornerAmount;
+      }
+    }
   }, []);
 
   // Connect an audio source to the analyser
@@ -278,6 +397,8 @@ export function useMouthAnimation(
     if (driverRef.current) {
       driverRef.current.reset();
     }
+    smoothedMouthRef.current = 0;
+    prevMouthRef.current = 0;
     // Reset morph target
     if (morphTargetRef.current) {
       const { mesh, index } = morphTargetRef.current;
@@ -288,6 +409,14 @@ export function useMouthAnimation(
     // Reset jaw bone
     if (jawBoneRef.current && jawRestRotationRef.current) {
       jawBoneRef.current.bone.rotation.copy(jawRestRotationRef.current);
+    }
+    // Reset lip bones
+    const lips = lipBonesRef.current;
+    const lipRest = lipRestPosesRef.current;
+    for (const [key, bone] of Object.entries(lips)) {
+      if (bone && lipRest[key]) {
+        bone.rotation.copy(lipRest[key]);
+      }
     }
   }, []);
 

@@ -284,13 +284,11 @@ export function useGenesisAnimation(
     // Reset l_eye and r_eye to (0,0,0) so they look straight ahead.
     // ========================================================================
 
-    // Reset eye bones to neutral (render loop forces them each frame anyway)
+    // Capture eye bone rest rotation from the GLB (don't override)
     if (bones.eyeL) {
-      bones.eyeL.rotation.set(0, 0, 0);
       restPosesRef.current.eyeL = bones.eyeL.rotation.clone();
     }
     if (bones.eyeR) {
-      bones.eyeR.rotation.set(0, 0, 0);
       restPosesRef.current.eyeR = bones.eyeR.rotation.clone();
     }
 

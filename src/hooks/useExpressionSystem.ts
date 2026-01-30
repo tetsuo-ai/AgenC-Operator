@@ -1,14 +1,18 @@
 /**
  * ============================================================================
- * useExpressionSystem - Facial Expression Animation System
+ * useExpressionSystem - Bone-Based Facial Expression Animation System
  * ============================================================================
- * Provides procedural facial expressions that layer on top of other animations:
- *   - Random smiles during idle and speech
- *   - Brow raise on emphasis / thinking
- *   - Eye widening for surprise / emphasis
- *   - Happy eyes (slight squint) during speech
+ * Provides procedural facial expressions using Genesis 9 facial bones:
+ *   - Smile via lip corner + cheek bones
+ *   - Brow raise/knit via brow bones
+ *   - Eye gaze shifts via eye bones
+ *   - Nostril flare on speech emphasis
+ *   - Eyelid widen for surprise/emphasis
+ *   - Speech-reactive brow movement
+ *   - Micro-expressions during idle
  *
  * All animations are additive and designed to layer with idle + talking systems.
+ * Lip corners are animated additively on top of useMouthAnimation's speech spread.
  * ============================================================================
  */
 
@@ -31,9 +35,9 @@ export interface ExpressionConfig {
   smileIntensity: number;
   /** Brow raise amount for emphasis (radians) */
   browEmphasisAmount: number;
-  /** Eye widen amount on emphasis (0-1 morph weight) */
+  /** Eye widen amount on emphasis (radians for eyelid bones) */
   eyeWidenOnEmphasis: number;
-  /** Slight happy-eye squint during speech (0-1) */
+  /** Slight happy-eye squint during speech (radians for eyelid bones) */
   happyEyesDuringSpeech: number;
 }
 
@@ -43,19 +47,40 @@ const DEFAULT_CONFIG: ExpressionConfig = {
   smileDuration: 2.0,
   smileIntensity: 0.4,
   browEmphasisAmount: 0.3,
-  eyeWidenOnEmphasis: 0.15,
-  happyEyesDuringSpeech: 0.1,
+  eyeWidenOnEmphasis: 0.06,
+  happyEyesDuringSpeech: 0.03,
 };
 
 // ============================================================================
-// Bone References
+// Bone References (expanded Genesis 9 facial rig)
 // ============================================================================
 
 interface ExpressionBoneRefs {
+  // Brow bones
   browInnerL?: THREE.Bone;
   browInnerR?: THREE.Bone;
   browOuterL?: THREE.Bone;
   browOuterR?: THREE.Bone;
+  // Lip corner bones (for bone-based smile)
+  lipCornerL?: THREE.Bone;
+  lipCornerR?: THREE.Bone;
+  // Cheek bones (for Duchenne smile)
+  cheekL?: THREE.Bone;
+  cheekR?: THREE.Bone;
+  // Nostril bones (for emphasis flare)
+  nostrilL?: THREE.Bone;
+  nostrilR?: THREE.Bone;
+  // Center lip bones (for pout/press)
+  lipUpperCenter?: THREE.Bone;
+  lipLowerCenter?: THREE.Bone;
+  // Eye bones (for gaze shifts)
+  eyeL?: THREE.Bone;
+  eyeR?: THREE.Bone;
+  // Eyelid bones (for widen/squint via bones)
+  eyelidUpperL?: THREE.Bone;
+  eyelidUpperR?: THREE.Bone;
+  eyelidLowerL?: THREE.Bone;
+  eyelidLowerR?: THREE.Bone;
 }
 
 interface ExpressionRestPoses {
@@ -63,7 +88,7 @@ interface ExpressionRestPoses {
 }
 
 // ============================================================================
-// Morph Refs
+// Morph Refs (used if available, but most Victoria 9 models lack them)
 // ============================================================================
 
 interface ExpressionMorphRefs {
@@ -79,7 +104,7 @@ interface ExpressionMorphRefs {
 // Expression State
 // ============================================================================
 
-type ExpressionType = 'happy' | 'thinking' | 'emphasis';
+type ExpressionType = 'happy' | 'thinking' | 'emphasis' | 'curious' | 'attentive' | 'surprised' | 'concerned';
 
 interface ActiveExpression {
   type: ExpressionType;
@@ -97,6 +122,26 @@ interface ExpressionState {
   nextSmileTime: number;
   // Triggered expression
   activeExpression: ActiveExpression | null;
+  // Speech-reactive brow
+  speechBrowTarget: number;
+  speechBrowCurrent: number;
+  prevAmplitude: number;
+  amplitudeAccum: number;
+  lastBrowPulseTime: number;
+  // Micro-expressions during idle
+  nextMicroExprTime: number;
+  microExprType: 'brow_twitch' | 'lip_press' | 'none';
+  microExprStart: number;
+  microExprDuration: number;
+  // Eye gaze
+  gazeTargetX: number;
+  gazeTargetY: number;
+  gazeCurrentX: number;
+  gazeCurrentY: number;
+  nextGazeShiftTime: number;
+  // Nostril flare
+  nostrilFlareCurrent: number;
+  nostrilFlareTarget: number;
   // Debug
   debugLogTime: number;
 }
@@ -106,10 +151,10 @@ interface ExpressionState {
 // ============================================================================
 
 export interface UseExpressionSystemReturn {
-  /** Initialize with loaded scene - finds morph targets and bones for expressions */
+  /** Initialize with loaded scene - finds bones for expressions */
   initialize: (scene: THREE.Object3D) => void;
-  /** Update expressions each frame */
-  update: (delta: number, isSpeaking: boolean) => void;
+  /** Update expressions each frame. mouthOpen (0-1) enables speech-reactive brows. */
+  update: (delta: number, isSpeaking: boolean, mouthOpen?: number) => void;
   /** Trigger a specific expression */
   triggerExpression: (type: ExpressionType, duration: number) => void;
 }
@@ -118,14 +163,35 @@ export interface UseExpressionSystemReturn {
 // Bone Name Patterns (Genesis 9)
 // ============================================================================
 
-const BROW_BONE_PATTERNS: Record<keyof ExpressionBoneRefs, RegExp[]> = {
+const FACE_BONE_PATTERNS: Record<keyof ExpressionBoneRefs, RegExp[]> = {
+  // Brow bones
   browInnerL: [/^l_browinner$/i, /^browInnerL$/i, /^l_brow_inner$/i],
   browInnerR: [/^r_browinner$/i, /^browInnerR$/i, /^r_brow_inner$/i],
   browOuterL: [/^l_browouter$/i, /^browOuterL$/i, /^l_brow_outer$/i],
   browOuterR: [/^r_browouter$/i, /^browOuterR$/i, /^r_brow_outer$/i],
+  // Lip corners
+  lipCornerL: [/^l_lipcorner$/i, /^lipCornerL$/i],
+  lipCornerR: [/^r_lipcorner$/i, /^lipCornerR$/i],
+  // Cheeks
+  cheekL: [/^l_cheek$/i, /^l_cheekupper$/i, /^cheekL$/i],
+  cheekR: [/^r_cheek$/i, /^r_cheekupper$/i, /^cheekR$/i],
+  // Nostrils
+  nostrilL: [/^l_nostril$/i, /^nostrilL$/i],
+  nostrilR: [/^r_nostril$/i, /^nostrilR$/i],
+  // Center lips
+  lipUpperCenter: [/^center_lipupper$/i, /^centerlipupper$/i, /^mid_lipupper$/i],
+  lipLowerCenter: [/^center_liplower$/i, /^centerliplower$/i, /^mid_liplower$/i],
+  // Eyes
+  eyeL: [/^l_eye$/i],
+  eyeR: [/^r_eye$/i],
+  // Eyelids (for widen/squint)
+  eyelidUpperL: [/^l_eyelidupper$/i],
+  eyelidUpperR: [/^r_eyelidupper$/i],
+  eyelidLowerL: [/^l_eyelidlower$/i],
+  eyelidLowerR: [/^r_eyelidlower$/i],
 };
 
-// Morph target patterns for expression morphs
+// Morph target patterns (used if available)
 const MORPH_PATTERNS = {
   smile: [/smile/i, /mouthSmile/i, /happy/i, /facs_bs_MouthSmile/i, /facs_ctrl_Smile/i],
   browRaise: [/browRaise/i, /browUp/i, /browInnerUp/i, /facs_bs_BrowInnerUp/i, /facs_ctrl_BrowRaise/i],
@@ -154,6 +220,22 @@ export function useExpressionSystem(
     smileIntensityCurrent: 0,
     nextSmileTime: Math.random() * 10 + 5,
     activeExpression: null,
+    speechBrowTarget: 0,
+    speechBrowCurrent: 0,
+    prevAmplitude: 0,
+    amplitudeAccum: 0,
+    lastBrowPulseTime: 0,
+    nextMicroExprTime: Math.random() * 15 + 8,
+    microExprType: 'none',
+    microExprStart: 0,
+    microExprDuration: 0,
+    gazeTargetX: 0,
+    gazeTargetY: 0,
+    gazeCurrentX: 0,
+    gazeCurrentY: 0,
+    nextGazeShiftTime: Math.random() * 5 + 3,
+    nostrilFlareCurrent: 0,
+    nostrilFlareTarget: 0,
     debugLogTime: 0,
   });
 
@@ -204,28 +286,41 @@ export function useExpressionSystem(
 
     log.info('[ExpressionSystem] ========== INITIALIZING ==========');
 
-    // Find brow bones
+    // Find all facial bones
     const bones: ExpressionBoneRefs = {};
     const foundBones: string[] = [];
+    const missingBones: string[] = [];
 
-    for (const [key, patterns] of Object.entries(BROW_BONE_PATTERNS)) {
+    for (const [key, patterns] of Object.entries(FACE_BONE_PATTERNS)) {
       const bone = findBone(scene, patterns);
       if (bone) {
         bones[key as keyof ExpressionBoneRefs] = bone;
         restPosesRef.current[key] = bone.rotation.clone();
         foundBones.push(`${key} -> "${bone.name}"`);
+      } else {
+        missingBones.push(key);
       }
     }
     bonesRef.current = bones;
 
     if (foundBones.length > 0) {
-      log.info(`[ExpressionSystem] Found ${foundBones.length} brow bones:`);
+      log.info(`[ExpressionSystem] Found ${foundBones.length} facial bones:`);
       foundBones.forEach(b => log.debug(`[ExpressionSystem]   + ${b}`));
-    } else {
-      log.warn('[ExpressionSystem] No brow bones found - brow animations disabled');
+    }
+    if (missingBones.length > 0) {
+      log.debug(`[ExpressionSystem] Missing ${missingBones.length} bones: ${missingBones.join(', ')}`);
     }
 
-    // Find morph targets for expressions
+    // Log capabilities
+    const hasBrows = !!(bones.browInnerL || bones.browOuterL);
+    const hasLipCorners = !!(bones.lipCornerL && bones.lipCornerR);
+    const hasCheeks = !!(bones.cheekL && bones.cheekR);
+    const hasNostrils = !!(bones.nostrilL && bones.nostrilR);
+    const hasEyes = !!(bones.eyeL && bones.eyeR);
+    const hasEyelids = !!(bones.eyelidUpperL && bones.eyelidUpperR);
+    log.info(`[ExpressionSystem] Capabilities: brows=${hasBrows}, lipCorners=${hasLipCorners}, cheeks=${hasCheeks}, nostrils=${hasNostrils}, eyes=${hasEyes}, eyelids=${hasEyelids}`);
+
+    // Find morph targets for expressions (optional — most Victoria 9 models lack them)
     scene.traverse((child) => {
       if (morphRef.current) return;
       if (child instanceof THREE.Mesh || child instanceof THREE.SkinnedMesh) {
@@ -237,7 +332,6 @@ export function useExpressionSystem(
           const squintLIdx = findMorphIndex(dict, MORPH_PATTERNS.eyeSquintL);
           const squintRIdx = findMorphIndex(dict, MORPH_PATTERNS.eyeSquintR);
 
-          // Accept mesh if we found at least one expression morph
           if (smileIdx !== undefined || browIdx !== undefined || eyeWideIdx !== undefined) {
             morphRef.current = {
               mesh: child,
@@ -247,20 +341,14 @@ export function useExpressionSystem(
               eyeSquintLIndex: squintLIdx,
               eyeSquintRIndex: squintRIdx,
             };
-
-            log.info(`[ExpressionSystem] Found expression morphs on "${child.name}":`);
-            if (smileIdx !== undefined) log.debug(`[ExpressionSystem]   + smile (index ${smileIdx})`);
-            if (browIdx !== undefined) log.debug(`[ExpressionSystem]   + browRaise (index ${browIdx})`);
-            if (eyeWideIdx !== undefined) log.debug(`[ExpressionSystem]   + eyeWide (index ${eyeWideIdx})`);
-            if (squintLIdx !== undefined) log.debug(`[ExpressionSystem]   + eyeSquintL (index ${squintLIdx})`);
-            if (squintRIdx !== undefined) log.debug(`[ExpressionSystem]   + eyeSquintR (index ${squintRIdx})`);
+            log.info(`[ExpressionSystem] Found expression morphs on "${child.name}"`);
           }
         }
       }
     });
 
     if (!morphRef.current) {
-      log.warn('[ExpressionSystem] No expression morph targets found - morph-based expressions disabled');
+      log.info('[ExpressionSystem] No expression morphs found — using bone-based expressions only');
     }
 
     initializedRef.current = true;
@@ -271,11 +359,13 @@ export function useExpressionSystem(
   // Update (call every frame)
   // ============================================================================
 
-  const update = useCallback((delta: number, isSpeaking: boolean) => {
+  const update = useCallback((delta: number, isSpeaking: boolean, mouthOpen: number = 0) => {
     if (!initializedRef.current) return;
 
     const config = configRef.current;
     const state = stateRef.current;
+    const bones = bonesRef.current;
+    const rest = restPosesRef.current;
 
     state.time += delta;
     const t = state.time;
@@ -291,7 +381,7 @@ export function useExpressionSystem(
     }
 
     // ========================================
-    // Smile Animation
+    // Smile Animation (with varied curve)
     // ========================================
     if (state.isSmiling) {
       const smileProgress = (t - state.smileStartTime) / config.smileDuration;
@@ -299,18 +389,98 @@ export function useExpressionSystem(
       if (smileProgress >= 1) {
         state.isSmiling = false;
         state.smileIntensityCurrent = 0;
-        // Schedule next smile
         const interval = 60 / Math.max(1, config.smileChancePerMinute);
-        state.nextSmileTime = t + interval * (0.5 + Math.random());
+        state.nextSmileTime = t + interval * (0.3 + Math.random() * 1.2);
       } else {
-        // Smooth bell curve: ease in, hold, ease out
-        const curve = Math.sin(smileProgress * Math.PI);
+        // Asymmetric curve: quicker onset, longer hold, gentle fade
+        const curve = smileProgress < 0.3
+          ? Math.sin((smileProgress / 0.3) * Math.PI * 0.5)
+          : Math.sin(0.5 * Math.PI + ((smileProgress - 0.3) / 0.7) * Math.PI * 0.5);
         state.smileIntensityCurrent = curve * config.smileIntensity;
       }
     } else {
-      // Decay smile smoothly
-      state.smileIntensityCurrent = THREE.MathUtils.lerp(state.smileIntensityCurrent, 0, delta * 5);
+      state.smileIntensityCurrent = THREE.MathUtils.lerp(state.smileIntensityCurrent, 0, delta * 3);
     }
+
+    // ========================================
+    // Speech-reactive Brow Movement
+    // ========================================
+    if (isSpeaking && mouthOpen > 0) {
+      const ampDelta = mouthOpen - state.prevAmplitude;
+      state.prevAmplitude = mouthOpen;
+
+      if (ampDelta > 0.03) {
+        state.amplitudeAccum += ampDelta;
+      } else {
+        state.amplitudeAccum *= 0.9;
+      }
+
+      // Fire a brow pulse on significant amplitude spikes
+      if (state.amplitudeAccum > 0.15 && t - state.lastBrowPulseTime > 1.5) {
+        state.speechBrowTarget = Math.min(0.5, state.amplitudeAccum) * config.browEmphasisAmount;
+        state.lastBrowPulseTime = t;
+        state.amplitudeAccum = 0;
+      }
+
+      if (t - state.lastBrowPulseTime > 0.4) {
+        state.speechBrowTarget *= 0.92;
+      }
+
+      // Nostril flare on emphasis spikes
+      if (state.amplitudeAccum > 0.1) {
+        state.nostrilFlareTarget = Math.min(0.06, state.amplitudeAccum * 0.1);
+      }
+    } else {
+      state.prevAmplitude = 0;
+      state.amplitudeAccum = 0;
+      state.speechBrowTarget *= 0.9;
+      state.nostrilFlareTarget *= 0.85;
+    }
+    state.speechBrowCurrent = THREE.MathUtils.lerp(state.speechBrowCurrent, state.speechBrowTarget, delta * 5);
+    state.nostrilFlareCurrent = THREE.MathUtils.lerp(state.nostrilFlareCurrent, state.nostrilFlareTarget, delta * 6);
+
+    // ========================================
+    // Micro-expressions During Idle
+    // ========================================
+    let microBrowTwitch = 0;
+    let microLipPress = 0;
+    if (!isSpeaking && t >= state.nextMicroExprTime && state.microExprType === 'none') {
+      state.microExprType = Math.random() > 0.5 ? 'brow_twitch' : 'lip_press';
+      state.microExprStart = t;
+      state.microExprDuration = 0.3 + Math.random() * 0.5;
+    }
+
+    if (state.microExprType !== 'none') {
+      const mProgress = (t - state.microExprStart) / state.microExprDuration;
+      if (mProgress >= 1) {
+        state.microExprType = 'none';
+        state.nextMicroExprTime = t + 8 + Math.random() * 20;
+      } else {
+        const mCurve = Math.sin(mProgress * Math.PI);
+        if (state.microExprType === 'brow_twitch') {
+          microBrowTwitch = mCurve * 0.08;
+        } else if (state.microExprType === 'lip_press') {
+          microLipPress = mCurve * 0.02;
+        }
+      }
+    }
+
+    // ========================================
+    // Eye Gaze Shifts (idle only)
+    // ========================================
+    if (!isSpeaking && t >= state.nextGazeShiftTime) {
+      // Pick a new random gaze target
+      state.gazeTargetX = (Math.random() - 0.5) * 0.06; // ±0.03 rad
+      state.gazeTargetY = (Math.random() - 0.5) * 0.04; // ±0.02 rad
+      state.nextGazeShiftTime = t + 3 + Math.random() * 5;
+    }
+    if (isSpeaking) {
+      // Look at user when speaking (return to rest)
+      state.gazeTargetX = 0;
+      state.gazeTargetY = 0;
+    }
+    state.gazeCurrentX = THREE.MathUtils.lerp(state.gazeCurrentX, state.gazeTargetX, delta * 2);
+    state.gazeCurrentY = THREE.MathUtils.lerp(state.gazeCurrentY, state.gazeTargetY, delta * 2);
 
     // ========================================
     // Triggered Expression
@@ -318,6 +488,8 @@ export function useExpressionSystem(
     let browRaiseAmount = 0;
     let eyeWidenAmount = 0;
     let expressionSmileBoost = 0;
+    let browKnitAmount = 0; // For 'concerned' — rotate brows inward
+    let expressionNostrilFlare = 0;
 
     if (state.activeExpression) {
       const expr = state.activeExpression;
@@ -339,66 +511,74 @@ export function useExpressionSystem(
           case 'emphasis':
             browRaiseAmount = exprIntensity * config.browEmphasisAmount * 0.7;
             eyeWidenAmount = exprIntensity * config.eyeWidenOnEmphasis;
+            expressionNostrilFlare = exprIntensity * 0.04;
+            break;
+          case 'curious':
+            browRaiseAmount = exprIntensity * config.browEmphasisAmount * 0.6;
+            eyeWidenAmount = exprIntensity * config.eyeWidenOnEmphasis * 0.5;
+            break;
+          case 'attentive':
+            browRaiseAmount = exprIntensity * config.browEmphasisAmount * 0.4;
+            eyeWidenAmount = exprIntensity * config.eyeWidenOnEmphasis * 0.3;
+            break;
+          case 'surprised':
+            browRaiseAmount = exprIntensity * config.browEmphasisAmount * 1.2;
+            eyeWidenAmount = exprIntensity * config.eyeWidenOnEmphasis * 1.5;
+            expressionNostrilFlare = exprIntensity * 0.03;
+            break;
+          case 'concerned':
+            browKnitAmount = exprIntensity * config.browEmphasisAmount * 0.5;
             break;
         }
       }
     }
 
-    // ========================================
-    // Happy eyes during speech
-    // ========================================
+    // Combine speech-reactive brow with triggered expressions
+    browRaiseAmount = Math.min(config.browEmphasisAmount * 1.5, browRaiseAmount + state.speechBrowCurrent);
+
+    // Combine nostril flare sources
+    const totalNostrilFlare = state.nostrilFlareCurrent + expressionNostrilFlare;
+
+    // Total smile: random smiles + triggered expression boosts
+    const totalSmile = Math.min(1, state.smileIntensityCurrent + expressionSmileBoost);
+
+    // Happy eyes during speech (subtle eyelid squint)
     let eyeSquintAmount = 0;
     if (isSpeaking && config.happyEyesDuringSpeech > 0) {
       eyeSquintAmount = config.happyEyesDuringSpeech;
     }
+    // Also squint slightly during smiles (Duchenne effect)
+    eyeSquintAmount += totalSmile * 0.02;
 
     // ========================================
-    // Apply Morph Targets
+    // Apply Morph Targets (if available)
     // ========================================
     if (morphRef.current && morphRef.current.mesh.morphTargetInfluences) {
       const influences = morphRef.current.mesh.morphTargetInfluences;
 
-      // Smile morph
       if (morphRef.current.smileIndex !== undefined) {
-        const targetSmile = Math.min(1, state.smileIntensityCurrent + expressionSmileBoost);
         influences[morphRef.current.smileIndex] = THREE.MathUtils.lerp(
-          influences[morphRef.current.smileIndex],
-          targetSmile,
-          delta * 8
+          influences[morphRef.current.smileIndex], totalSmile, delta * 6
         );
       }
-
-      // Brow raise morph
       if (morphRef.current.browRaiseIndex !== undefined) {
         influences[morphRef.current.browRaiseIndex] = THREE.MathUtils.lerp(
-          influences[morphRef.current.browRaiseIndex],
-          browRaiseAmount,
-          delta * 6
+          influences[morphRef.current.browRaiseIndex], browRaiseAmount, delta * 5
         );
       }
-
-      // Eye wide morph
       if (morphRef.current.eyeWideIndex !== undefined) {
         influences[morphRef.current.eyeWideIndex] = THREE.MathUtils.lerp(
-          influences[morphRef.current.eyeWideIndex],
-          eyeWidenAmount,
-          delta * 6
+          influences[morphRef.current.eyeWideIndex], eyeWidenAmount, delta * 5
         );
       }
-
-      // Eye squint morphs (happy eyes)
       if (morphRef.current.eyeSquintLIndex !== undefined) {
         influences[morphRef.current.eyeSquintLIndex] = THREE.MathUtils.lerp(
-          influences[morphRef.current.eyeSquintLIndex],
-          eyeSquintAmount,
-          delta * 4
+          influences[morphRef.current.eyeSquintLIndex], eyeSquintAmount, delta * 3
         );
       }
       if (morphRef.current.eyeSquintRIndex !== undefined) {
         influences[morphRef.current.eyeSquintRIndex] = THREE.MathUtils.lerp(
-          influences[morphRef.current.eyeSquintRIndex],
-          eyeSquintAmount,
-          delta * 4
+          influences[morphRef.current.eyeSquintRIndex], eyeSquintAmount, delta * 3
         );
       }
     }
@@ -406,51 +586,206 @@ export function useExpressionSystem(
     // ========================================
     // Apply Brow Bone Rotations
     // ========================================
-    const bones = bonesRef.current;
-    const rest = restPosesRef.current;
+    const totalBrowRaise = browRaiseAmount + microBrowTwitch;
 
-    if (browRaiseAmount > 0) {
+    if (totalBrowRaise > 0.001 || browKnitAmount > 0.001) {
       if (bones.browInnerL && rest.browInnerL) {
+        // Concerned knit: rotate inward (positive X). Raise: negative X.
+        const target = browKnitAmount > 0
+          ? rest.browInnerL.x + browKnitAmount
+          : rest.browInnerL.x - totalBrowRaise;
         bones.browInnerL.rotation.x = THREE.MathUtils.lerp(
-          bones.browInnerL.rotation.x,
-          rest.browInnerL.x - browRaiseAmount,
-          delta * 6
+          bones.browInnerL.rotation.x, target, delta * 5
         );
       }
       if (bones.browInnerR && rest.browInnerR) {
+        const rightAmount = microBrowTwitch > 0 ? totalBrowRaise * 0.4 : totalBrowRaise;
+        const target = browKnitAmount > 0
+          ? rest.browInnerR.x + browKnitAmount
+          : rest.browInnerR.x - rightAmount;
         bones.browInnerR.rotation.x = THREE.MathUtils.lerp(
-          bones.browInnerR.rotation.x,
-          rest.browInnerR.x - browRaiseAmount,
-          delta * 6
+          bones.browInnerR.rotation.x, target, delta * 5
         );
       }
       if (bones.browOuterL && rest.browOuterL) {
         bones.browOuterL.rotation.x = THREE.MathUtils.lerp(
           bones.browOuterL.rotation.x,
-          rest.browOuterL.x - browRaiseAmount * 0.5,
-          delta * 6
+          rest.browOuterL.x - totalBrowRaise * 0.5,
+          delta * 5
         );
       }
       if (bones.browOuterR && rest.browOuterR) {
+        const rightOuter = microBrowTwitch > 0 ? totalBrowRaise * 0.2 : totalBrowRaise * 0.5;
         bones.browOuterR.rotation.x = THREE.MathUtils.lerp(
           bones.browOuterR.rotation.x,
-          rest.browOuterR.x - browRaiseAmount * 0.5,
-          delta * 6
+          rest.browOuterR.x - rightOuter,
+          delta * 5
         );
       }
     } else {
       // Lerp brow bones back to rest
       if (bones.browInnerL && rest.browInnerL) {
-        bones.browInnerL.rotation.x = THREE.MathUtils.lerp(bones.browInnerL.rotation.x, rest.browInnerL.x, delta * 4);
+        bones.browInnerL.rotation.x = THREE.MathUtils.lerp(bones.browInnerL.rotation.x, rest.browInnerL.x, delta * 3);
       }
       if (bones.browInnerR && rest.browInnerR) {
-        bones.browInnerR.rotation.x = THREE.MathUtils.lerp(bones.browInnerR.rotation.x, rest.browInnerR.x, delta * 4);
+        bones.browInnerR.rotation.x = THREE.MathUtils.lerp(bones.browInnerR.rotation.x, rest.browInnerR.x, delta * 3);
       }
       if (bones.browOuterL && rest.browOuterL) {
-        bones.browOuterL.rotation.x = THREE.MathUtils.lerp(bones.browOuterL.rotation.x, rest.browOuterL.x, delta * 4);
+        bones.browOuterL.rotation.x = THREE.MathUtils.lerp(bones.browOuterL.rotation.x, rest.browOuterL.x, delta * 3);
       }
       if (bones.browOuterR && rest.browOuterR) {
-        bones.browOuterR.rotation.x = THREE.MathUtils.lerp(bones.browOuterR.rotation.x, rest.browOuterR.x, delta * 4);
+        bones.browOuterR.rotation.x = THREE.MathUtils.lerp(bones.browOuterR.rotation.x, rest.browOuterR.x, delta * 3);
+      }
+    }
+
+    // ========================================
+    // Apply Bone-Based Smile (lip corners + cheeks)
+    // ========================================
+    // Lip corners: additive on top of useMouthAnimation's speech spread
+    // useMouthAnimation sets cornerL/R.rotation.z for lip spread
+    // Here we add rotation on X (upward = smile) additively
+    if (totalSmile > 0.001) {
+      const smileCornerAmount = totalSmile * 0.12; // lip corner rotation for smile
+      const smileCheekAmount = totalSmile * 0.04;  // cheek raise for Duchenne
+
+      if (bones.lipCornerL && rest.lipCornerL) {
+        // Additive: read current rotation (may include mouth spread), add smile offset
+        const targetX = rest.lipCornerL.x - smileCornerAmount; // negative X = upward
+        bones.lipCornerL.rotation.x = THREE.MathUtils.lerp(
+          bones.lipCornerL.rotation.x, targetX, delta * 5
+        );
+      }
+      if (bones.lipCornerR && rest.lipCornerR) {
+        const targetX = rest.lipCornerR.x - smileCornerAmount;
+        bones.lipCornerR.rotation.x = THREE.MathUtils.lerp(
+          bones.lipCornerR.rotation.x, targetX, delta * 5
+        );
+      }
+      if (bones.cheekL && rest.cheekL) {
+        bones.cheekL.rotation.x = THREE.MathUtils.lerp(
+          bones.cheekL.rotation.x, rest.cheekL.x - smileCheekAmount, delta * 4
+        );
+      }
+      if (bones.cheekR && rest.cheekR) {
+        bones.cheekR.rotation.x = THREE.MathUtils.lerp(
+          bones.cheekR.rotation.x, rest.cheekR.x - smileCheekAmount, delta * 4
+        );
+      }
+    } else {
+      // Lerp lip corners and cheeks back to rest (only X axis — Z is managed by mouth animation)
+      if (bones.lipCornerL && rest.lipCornerL) {
+        bones.lipCornerL.rotation.x = THREE.MathUtils.lerp(bones.lipCornerL.rotation.x, rest.lipCornerL.x, delta * 3);
+      }
+      if (bones.lipCornerR && rest.lipCornerR) {
+        bones.lipCornerR.rotation.x = THREE.MathUtils.lerp(bones.lipCornerR.rotation.x, rest.lipCornerR.x, delta * 3);
+      }
+      if (bones.cheekL && rest.cheekL) {
+        bones.cheekL.rotation.x = THREE.MathUtils.lerp(bones.cheekL.rotation.x, rest.cheekL.x, delta * 3);
+      }
+      if (bones.cheekR && rest.cheekR) {
+        bones.cheekR.rotation.x = THREE.MathUtils.lerp(bones.cheekR.rotation.x, rest.cheekR.x, delta * 3);
+      }
+    }
+
+    // ========================================
+    // Apply Micro-Expression Lip Press
+    // ========================================
+    if (microLipPress > 0.001) {
+      // Slight upward push of lower center lip (lip press)
+      if (bones.lipLowerCenter && rest.lipLowerCenter) {
+        bones.lipLowerCenter.rotation.x = THREE.MathUtils.lerp(
+          bones.lipLowerCenter.rotation.x,
+          rest.lipLowerCenter.x - microLipPress,
+          delta * 5
+        );
+      }
+    } else if (bones.lipLowerCenter && rest.lipLowerCenter) {
+      bones.lipLowerCenter.rotation.x = THREE.MathUtils.lerp(
+        bones.lipLowerCenter.rotation.x, rest.lipLowerCenter.x, delta * 3
+      );
+    }
+
+    // ========================================
+    // Apply Eye Gaze
+    // ========================================
+    if (bones.eyeL && rest.eyeL) {
+      bones.eyeL.rotation.x = THREE.MathUtils.lerp(
+        bones.eyeL.rotation.x, rest.eyeL.x + state.gazeCurrentY, delta * 4
+      );
+      bones.eyeL.rotation.y = THREE.MathUtils.lerp(
+        bones.eyeL.rotation.y, rest.eyeL.y + state.gazeCurrentX, delta * 4
+      );
+    }
+    if (bones.eyeR && rest.eyeR) {
+      bones.eyeR.rotation.x = THREE.MathUtils.lerp(
+        bones.eyeR.rotation.x, rest.eyeR.x + state.gazeCurrentY, delta * 4
+      );
+      bones.eyeR.rotation.y = THREE.MathUtils.lerp(
+        bones.eyeR.rotation.y, rest.eyeR.y + state.gazeCurrentX, delta * 4
+      );
+    }
+
+    // ========================================
+    // Apply Nostril Flare
+    // ========================================
+    if (totalNostrilFlare > 0.001) {
+      if (bones.nostrilL && rest.nostrilL) {
+        bones.nostrilL.rotation.z = THREE.MathUtils.lerp(
+          bones.nostrilL.rotation.z, rest.nostrilL.z + totalNostrilFlare, delta * 8
+        );
+      }
+      if (bones.nostrilR && rest.nostrilR) {
+        bones.nostrilR.rotation.z = THREE.MathUtils.lerp(
+          bones.nostrilR.rotation.z, rest.nostrilR.z - totalNostrilFlare, delta * 8
+        );
+      }
+    } else {
+      if (bones.nostrilL && rest.nostrilL) {
+        bones.nostrilL.rotation.z = THREE.MathUtils.lerp(bones.nostrilL.rotation.z, rest.nostrilL.z, delta * 4);
+      }
+      if (bones.nostrilR && rest.nostrilR) {
+        bones.nostrilR.rotation.z = THREE.MathUtils.lerp(bones.nostrilR.rotation.z, rest.nostrilR.z, delta * 4);
+      }
+    }
+
+    // ========================================
+    // Apply Eyelid Widen / Squint (bone-based)
+    // ========================================
+    // Positive eyeWidenAmount = open wider (eyelid up), negative = squint
+    const eyelidOffset = eyeWidenAmount > 0
+      ? -eyeWidenAmount  // Widen: rotate upper eyelid up (negative X)
+      : eyeSquintAmount; // Squint: rotate upper eyelid down (positive X)
+
+    if (Math.abs(eyelidOffset) > 0.001) {
+      if (bones.eyelidUpperL && rest.eyelidUpperL) {
+        bones.eyelidUpperL.rotation.x = THREE.MathUtils.lerp(
+          bones.eyelidUpperL.rotation.x,
+          rest.eyelidUpperL.x + eyelidOffset,
+          delta * 5
+        );
+      }
+      if (bones.eyelidUpperR && rest.eyelidUpperR) {
+        bones.eyelidUpperR.rotation.x = THREE.MathUtils.lerp(
+          bones.eyelidUpperR.rotation.x,
+          rest.eyelidUpperR.x + eyelidOffset,
+          delta * 5
+        );
+      }
+      // Lower eyelids: subtle counter-movement
+      const lowerLidOffset = eyelidOffset * 0.3;
+      if (bones.eyelidLowerL && rest.eyelidLowerL) {
+        bones.eyelidLowerL.rotation.x = THREE.MathUtils.lerp(
+          bones.eyelidLowerL.rotation.x,
+          rest.eyelidLowerL.x - lowerLidOffset,
+          delta * 4
+        );
+      }
+      if (bones.eyelidLowerR && rest.eyelidLowerR) {
+        bones.eyelidLowerR.rotation.x = THREE.MathUtils.lerp(
+          bones.eyelidLowerR.rotation.x,
+          rest.eyelidLowerR.x - lowerLidOffset,
+          delta * 4
+        );
       }
     }
 
@@ -460,9 +795,11 @@ export function useExpressionSystem(
     if (t - state.debugLogTime >= 10.0) {
       state.debugLogTime = t;
       log.debug(
-        `[ExpressionSystem] smile=${state.smileIntensityCurrent.toFixed(2)}, ` +
+        `[ExpressionSystem] smile=${totalSmile.toFixed(2)}, ` +
         `browRaise=${browRaiseAmount.toFixed(2)}, ` +
         `eyeWiden=${eyeWidenAmount.toFixed(2)}, ` +
+        `gaze=(${state.gazeCurrentX.toFixed(3)},${state.gazeCurrentY.toFixed(3)}), ` +
+        `nostril=${totalNostrilFlare.toFixed(3)}, ` +
         `speaking=${isSpeaking}`
       );
     }

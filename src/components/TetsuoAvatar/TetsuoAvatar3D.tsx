@@ -30,12 +30,7 @@ import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
 import { SkeletonUtils } from "three-stdlib";
 import { useEffect, useMemo, useRef, lazy, Suspense } from "react";
 
-// Post-processing components (disabled - @react-three/postprocessing not installed)
-// Run `npm install @react-three/postprocessing postprocessing` to enable
-const EffectComposer: React.ComponentType<{ children: React.ReactNode }> | null = null;
-const Bloom: React.ComponentType<Record<string, unknown>> | null = null;
-const Vignette: React.ComponentType<Record<string, unknown>> | null = null;
-const SMAA: React.ComponentType | null = null;
+import { EffectComposer, Bloom, Vignette, SMAA } from "@react-three/postprocessing";
 import type { AgentAppearance, AgentStatus } from "../../types";
 import { useMouthAnimation } from "../../hooks/useMouthAnimation";
 import { useGenesisAnimation } from "../../hooks/useGenesisAnimation";
@@ -44,10 +39,10 @@ import { useIdleAnimation } from "../../hooks/useIdleAnimation";
 import { useTalkingAnimation } from "../../hooks/useTalkingAnimation";
 import { useCameraController } from "../../hooks/useCameraController";
 import { useAvatarStore } from "../../stores/avatarStore";
-
 import { log } from "../../utils/log";
+import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 
-const MODEL_PATH = "/models/agencfinalformr.glb";
+const MODEL_PATH = MODEL_CONFIG.path;
 
 // ============================================================================
 // Configuration Constants (tweak these to adjust behavior)
@@ -87,60 +82,15 @@ interface TetsuoAvatar3DProps {
 }
 
 // ============================================================================
-// Material Category Detection
+// Material Category Detection (delegates to shared modelConfig)
 // ============================================================================
 
 type MaterialCategory = 'skin' | 'hair' | 'eye' | 'mouth' | 'clothing' | 'accent' | 'default';
 
 function categorizeMesh(meshName: string, materialName: string): MaterialCategory {
-  const name = `${meshName} ${materialName}`.toLowerCase();
-
-  // Eye materials - Genesis 9 detailed eye system (check first to avoid matching 'eye' in 'eyelash')
-  if (name.includes('iris') || name.includes('pupil') || name.includes('cornea') ||
-      name.includes('sclera') || name.includes('moisture') || name.includes('refract') ||
-      name.includes('eye_') || name.includes('eye left') || name.includes('eye right') ||
-      name.includes('occlusion') || name.includes('tearline') || name.includes('tear')) {
-    return 'eye';
-  }
-
-  // Hair materials - Genesis 9 hair system
-  if (name.includes('hair') || name.includes('strand') || name.includes('bangs') ||
-      name.includes('scalp') || name.includes('nmixx')) {  // Model-specific hair
-    return 'hair';
-  }
-
-  // Mouth materials - separate for realistic rendering
-  if (name.includes('mouth') || name.includes('teeth') || name.includes('tongue') ||
-      name.includes('gum') || name.includes('cavity') || name.includes('lacrim')) {
-    return 'mouth';
-  }
-
-  // Clothing materials - Genesis 9 wardrobe
-  if (name.includes('shirt') || name.includes('pants') || name.includes('shorts') ||
-      name.includes('sock') || name.includes('shoe') || name.includes('tank') ||
-      name.includes('top') || name.includes('dress') || name.includes('jacket') ||
-      name.includes('cloth') || name.includes('fabric')) {
-    return 'clothing';
-  }
-
-  // Skin materials - Genesis 9 body (check after eye/hair/mouth to avoid overlap)
-  if (name.includes('skin') || name.includes('face') || name.includes('body') ||
-      name.includes('arm') || name.includes('leg') || name.includes('torso') ||
-      name.includes('head') || name.includes('neck') || name.includes('lip') ||
-      name.includes('nostril') || name.includes('ear') || name.includes('hand') ||
-      name.includes('foot') || name.includes('feet') || name.includes('finger') ||
-      name.includes('toe') || name.includes('nail') || name.includes('genesis') ||
-      name.includes('brow') || name.includes('lash')) {  // Eyebrows/lashes attached to skin
-    return 'skin';
-  }
-
-  // Accent materials - glow effects, cyberpunk elements
-  if (name.includes('accent') || name.includes('trim') || name.includes('glow') ||
-      name.includes('emissive') || name.includes('neon') || name.includes('circuit')) {
-    return 'accent';
-  }
-
-  return 'default';
+  const shared = categorizeMaterial(meshName, materialName, MODEL_CONFIG.materials);
+  // Map 'eyes' from shared config to 'eye' used locally
+  return shared === 'eyes' ? 'eye' : shared;
 }
 
 // ============================================================================
@@ -229,15 +179,24 @@ function applyAppearance(
           // Preserve GLB baked hair - no modifications
           break;
 
-        case 'eye':
-          // Eyes get emissive glow for cinematic effect
-          material.emissive.copy(eyeGlowColor);
-          material.emissiveIntensity = CONFIG.EMISSIVE_BASE_INTENSITY * intensity;
-          // Glossy eyes
+        case 'eye': {
           material.roughness = 0.1;
           material.metalness = 0;
-          // Preserve GLB eye textures - don't override map or color
+
+          // Eyeball meshes with baked textures: preserve texture, no emissive tint
+          const isEyeball = /^eye\s*(left|right)$/i.test(mat.name || '');
+          if (isEyeball && material.map) {
+            material.color.setHex(0xffffff);
+            material.emissive.setHex(0x000000);
+            material.emissiveIntensity = 0;
+            material.needsUpdate = true;
+          } else {
+            // Other eye materials (overlays, moisture): subtle glow
+            material.emissive.copy(eyeGlowColor);
+            material.emissiveIntensity = CONFIG.EMISSIVE_BASE_INTENSITY * intensity;
+          }
           break;
+        }
 
         case 'mouth':
           // Preserve mouth materials - realistic teeth/tongue
@@ -286,6 +245,9 @@ function updateEyeGlow(
 
   materialRefs.forEach((ref) => {
     if (ref.category === 'eye') {
+      // Skip eyeball meshes with baked textures (no emissive tint)
+      if (ref.material.map && ref.material.emissiveIntensity === 0) return;
+
       const baseIntensity = CONFIG.EMISSIVE_BASE_INTENSITY * intensity;
       if (isActive) {
         const pulse = Math.sin(time * CONFIG.EYE_PULSE_SPEED) * 0.5 + 0.5;
@@ -382,8 +344,41 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // Standard clone(true) leaves SkinnedMesh referencing original bones.
     const clone = SkeletonUtils.clone(gltf.scene);
 
-    // Model faces +Z natively (confirmed by eye bone positions).
-    // No scene rotation needed — camera is at +Z looking toward origin.
+    // Diagnostic: log scene root and children transforms to detect baked-in rotation
+    const r = gltf.scene.rotation;
+    const s = gltf.scene.scale;
+    log.info(`[TetsuoAvatar3D] GLB scene root rotation: (${r.x.toFixed(3)}, ${r.y.toFixed(3)}, ${r.z.toFixed(3)}) order=${r.order}`);
+    log.info(`[TetsuoAvatar3D] GLB scene root scale: (${s.x.toFixed(3)}, ${s.y.toFixed(3)}, ${s.z.toFixed(3)})`);
+    gltf.scene.children.forEach((child, i) => {
+      const cr = child.rotation;
+      const cs = child.scale;
+      const cp = child.position;
+      log.info(`[TetsuoAvatar3D] Child[${i}] "${child.name}" type=${child.type} pos=(${cp.x.toFixed(1)}, ${cp.y.toFixed(1)}, ${cp.z.toFixed(1)}) rot=(${cr.x.toFixed(3)}, ${cr.y.toFixed(3)}, ${cr.z.toFixed(3)}) scale=(${cs.x.toFixed(3)}, ${cs.y.toFixed(3)}, ${cs.z.toFixed(3)})`);
+      // For the Cube, log its bounding box
+      if (child.name === 'Cube' && (child as THREE.Mesh).isMesh) {
+        const cubeMesh = child as THREE.Mesh;
+        const cBox = new THREE.Box3().setFromObject(cubeMesh);
+        const cSize = new THREE.Vector3();
+        const cCenter = new THREE.Vector3();
+        cBox.getSize(cSize);
+        cBox.getCenter(cCenter);
+        log.info(`[TetsuoAvatar3D] Cube bbox: center=(${cCenter.x.toFixed(1)}, ${cCenter.y.toFixed(1)}, ${cCenter.z.toFixed(1)}) size=(${cSize.x.toFixed(1)}, ${cSize.y.toFixed(1)}, ${cSize.z.toFixed(1)})`);
+        log.info(`[TetsuoAvatar3D] Cube material: ${cubeMesh.material ? ((cubeMesh.material as THREE.Material).type + ' visible=' + (cubeMesh.material as THREE.Material).visible) : 'none'}`);
+      }
+    });
+
+    // TEMP DIAGNOSTIC: hide Cube and Sketchfab_model (hair) to test face visibility
+    clone.children.forEach((child) => {
+      if (child.name === 'Cube') {
+        child.visible = false;
+        log.info(`[TetsuoAvatar3D] TEMP: Hidden Cube`);
+      }
+      if (child.name === 'Sketchfab_model') {
+        child.visible = false;
+        log.info(`[TetsuoAvatar3D] TEMP: Hidden Sketchfab_model (hair)`);
+      }
+    });
+
     clone.updateMatrixWorld(true);
 
     // Disable frustum culling for all meshes - required for SkinnedMesh
@@ -458,6 +453,22 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     });
     log.info(`[TetsuoAvatar3D] Material fix applied to ${meshCount} meshes (${skinnedMeshCount} skinned)`);
 
+    // Diagnostic: log baseColorFactor for key materials
+    clone.traverse((child2) => {
+      if ((child2 as THREE.Mesh).isMesh) {
+        const mesh2 = child2 as THREE.Mesh;
+        const mats2 = Array.isArray(mesh2.material) ? mesh2.material : [mesh2.material];
+        mats2.forEach((m2) => {
+          const std2 = m2 as THREE.MeshStandardMaterial;
+          const name2 = `${child2.name}/${m2.name || 'unnamed'}`;
+          if (/skin|face|head|body|torso|genesis/i.test(name2) && !(/hair|strand|bangs|nmixx/i.test(name2))) {
+            const c = std2.color;
+            log.info(`[TetsuoAvatar3D] Material "${name2}" color=(${c.r.toFixed(3)}, ${c.g.toFixed(3)}, ${c.b.toFixed(3)}) hasMap=${!!std2.map} transparent=${std2.transparent} visible=${std2.visible}`);
+          }
+        });
+      }
+    });
+
     // Diagnostic: log key bone world positions
     const diagBones = ['head', 'l_eye', 'r_eye', 'l_shoulder', 'r_shoulder', 'l_upperarm', 'r_upperarm', 'l_forearm', 'r_forearm'];
     clone.traverse((obj) => {
@@ -467,6 +478,21 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
         log.info(`[TetsuoAvatar3D] Bone "${obj.name}" world pos: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
       }
     });
+
+    // Diagnostic: compute face forward direction (head → midpoint of eyes)
+    const bonePositions: Record<string, THREE.Vector3> = {};
+    clone.traverse((obj2) => {
+      if (obj2 instanceof THREE.Bone && ['head', 'l_eye', 'r_eye'].includes(obj2.name.toLowerCase())) {
+        obj2.updateWorldMatrix(true, false);
+        bonePositions[obj2.name.toLowerCase()] = new THREE.Vector3().setFromMatrixPosition(obj2.matrixWorld);
+      }
+    });
+    if (bonePositions['head'] && bonePositions['l_eye'] && bonePositions['r_eye']) {
+      const eyeCenter = bonePositions['l_eye'].clone().add(bonePositions['r_eye']).multiplyScalar(0.5);
+      const faceDir = eyeCenter.clone().sub(bonePositions['head']).normalize();
+      log.info(`[TetsuoAvatar3D] Face forward dir (head→eyes): (${faceDir.x.toFixed(3)}, ${faceDir.y.toFixed(3)}, ${faceDir.z.toFixed(3)})`);
+      log.info(`[TetsuoAvatar3D] Eye center world pos: (${eyeCenter.x.toFixed(1)}, ${eyeCenter.y.toFixed(1)}, ${eyeCenter.z.toFixed(1)})`);
+    }
 
     // Log eye mesh report so we can verify iris/pupil geometry exists
     if (eyeMeshReport.length > 0) {
@@ -627,11 +653,23 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   // Animation Loop
   // ========================================
 
-  const eyeBonesRef = useRef<{ eyeL: THREE.Bone | null; eyeR: THREE.Bone | null }>({ eyeL: null, eyeR: null });
-  const eyeBonesSearched = useRef(false);
-
-  useFrame((_, delta) => {
+  const camLogTimer = useRef(0);
+  useFrame(({ camera }, delta) => {
     timeRef.current += delta;
+    camLogTimer.current += delta;
+    // Log camera position once every 5 seconds
+    if (camLogTimer.current > 5) {
+      camLogTimer.current = 0;
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      log.info(`[Camera] pos=(${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}) dir=(${dir.x.toFixed(3)}, ${dir.y.toFixed(3)}, ${dir.z.toFixed(3)}) fov=${(camera as THREE.PerspectiveCamera).fov}`);
+      // Log model group world position
+      if (groupRef.current) {
+        const wp = new THREE.Vector3();
+        groupRef.current.getWorldPosition(wp);
+        log.info(`[Camera] group world pos=(${wp.x.toFixed(1)}, ${wp.y.toFixed(1)}, ${wp.z.toFixed(1)})`);
+      }
+    }
     const isSpeaking = status.mode === 'speaking';
 
     // Update eye glow based on voice state
@@ -651,8 +689,8 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // Genesis animation system (T-pose correction applied at init)
     genesisAnimation.update(delta, isSpeaking, mouthOpen);
 
-    // Facial expressions (smile, eyebrows, eye widening)
-    expressionSystem.update(delta, isSpeaking);
+    // Facial expressions (smile, eyebrows, eye widening, speech-reactive brows)
+    expressionSystem.update(delta, isSpeaking, mouthOpen);
 
     // Talking animations (head nods, hand gestures, shoulder shrugs)
     // Runs BEFORE idle so idle has final say on shared bones (head, shoulders)
@@ -661,19 +699,6 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // Idle animations (breathing, body sway, micro-movements, blinking)
     // Runs LAST to ensure breathing/sway are always visible
     idleAnimation.update(delta);
-
-    // Force eye bones to look forward every frame
-    if (!eyeBonesSearched.current) {
-      eyeBonesSearched.current = true;
-      clonedScene.traverse((child) => {
-        if (child instanceof THREE.Bone) {
-          if (child.name.toLowerCase() === 'l_eye') eyeBonesRef.current.eyeL = child;
-          if (child.name.toLowerCase() === 'r_eye') eyeBonesRef.current.eyeR = child;
-        }
-      });
-    }
-    if (eyeBonesRef.current.eyeL) eyeBonesRef.current.eyeL.rotation.set(-0.1, 0, 0);
-    if (eyeBonesRef.current.eyeR) eyeBonesRef.current.eyeR.rotation.set(-0.1, 0, 0);
 
     // Force skeleton recalculation after all bone modifications
     clonedScene.traverse((obj) => {
@@ -720,7 +745,7 @@ export default function TetsuoAvatar3D({
   const orbitEnabled = useAvatarStore((state) => state.orbitEnabled);
 
   return (
-    <div style={{ width: 420, height: 520 }}>
+    <div style={{ width: 800, height: 900 }}>
       <Canvas
         camera={{
           position: initialPreset.position as [number, number, number],
@@ -730,7 +755,7 @@ export default function TetsuoAvatar3D({
         }}
         onError={() => onLoadError?.()}
         frameloop="always"
-        dpr={[1, 2]}
+        dpr={[2, 3]}
         gl={{
           antialias: true,
           toneMapping: THREE.NeutralToneMapping,
@@ -743,17 +768,17 @@ export default function TetsuoAvatar3D({
 
         {/* ============ WARM LIGHTING SETUP ============ */}
 
-        {/* Key Light - Warm, softer for natural skin tones */}
+        {/* Key Light - Warm, brighter for high-res rendering */}
         <directionalLight
           position={[80, 180, 120]}
-          intensity={0.8}
+          intensity={1.0}
           color="#fff5e6"
         />
 
-        {/* Fill Light - Warm, subtle */}
+        {/* Fill Light - Warm, slightly stronger */}
         <directionalLight
           position={[-80, 120, 80]}
-          intensity={0.3}
+          intensity={0.4}
           color="#fff8f0"
         />
 
@@ -764,17 +789,26 @@ export default function TetsuoAvatar3D({
           color="#ffe8d6"
         />
 
-        {/* Ambient fill */}
-        <ambientLight intensity={0.3} />
+        {/* Face-focused SpotLight for definition */}
+        <spotLight
+          position={[0, 180, 100]}
+          angle={0.3}
+          penumbra={0.8}
+          intensity={0.5}
+          color="#fff5e6"
+        />
 
-        {/* City Environment for warm, natural reflections */}
-        <Environment preset="city" background={false} />
+        {/* Ambient fill */}
+        <ambientLight intensity={0.35} />
+
+        {/* Studio Environment for controlled, better skin rendering */}
+        <Environment preset="studio" background={false} />
 
         {/* The reactive model */}
         <ReactiveModel appearance={appearance} status={status} />
 
         {/* ============ POST-PROCESSING EFFECTS ============ */}
-        {CONFIG.ENABLE_POST_PROCESSING && EffectComposer && Bloom && Vignette && SMAA && (
+        {CONFIG.ENABLE_POST_PROCESSING && (
           <EffectComposer>
             {/* Subtle bloom for highlights and eye glow */}
             <Bloom

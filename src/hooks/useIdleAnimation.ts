@@ -328,7 +328,33 @@ export function useIdleAnimation(
     eyelidBonesRef.current = eyelids;
 
     if (Object.keys(eyelids).length > 0) {
-      log.info(`[IdleAnimation] 👁️ Found ${Object.keys(eyelids).length} eyelid bones for blink animation`);
+      log.info(`[IdleAnimation] Found ${Object.keys(eyelids).length} eyelid bones for blink animation`);
+
+      // Log raw rest poses for diagnostics
+      const topLRest = eyelidRestRef.current.topL;
+      const topRRest = eyelidRestRef.current.topR;
+      const botLRest = eyelidRestRef.current.botL;
+      const botRRest = eyelidRestRef.current.botR;
+      if (topLRest) log.info(`[IdleAnimation] Raw eyelid rest - topL x=${topLRest.x.toFixed(4)}`);
+      if (topRRest) log.info(`[IdleAnimation] Raw eyelid rest - topR x=${topRRest.x.toFixed(4)}`);
+      if (botLRest) log.info(`[IdleAnimation] Raw eyelid rest - botL x=${botLRest.x.toFixed(4)}`);
+      if (botRRest) log.info(`[IdleAnimation] Raw eyelid rest - botR x=${botRRest.x.toFixed(4)}`);
+
+      // Normalize eyelid rest poses - Genesis 9 models often have asymmetric
+      // eyelid rest rotations, causing one eye to appear more open than the other.
+      // Average left/right to ensure symmetric blinks.
+      if (topLRest && topRRest) {
+        const avgTopX = (topLRest.x + topRRest.x) / 2;
+        topLRest.x = avgTopX;
+        topRRest.x = avgTopX;
+        log.info(`[IdleAnimation] Normalized upper eyelid rest X to ${avgTopX.toFixed(4)}`);
+      }
+      if (botLRest && botRRest) {
+        const avgBotX = (botLRest.x + botRRest.x) / 2;
+        botLRest.x = avgBotX;
+        botRRest.x = avgBotX;
+        log.info(`[IdleAnimation] Normalized lower eyelid rest X to ${avgBotX.toFixed(4)}`);
+      }
     }
 
     log.info(`[IdleAnimation] Ready: ${Object.keys(bones).length} bones, blink: ${morphRef.current ? 'yes' : 'no'}`);
@@ -405,8 +431,10 @@ export function useIdleAnimation(
     }
 
     if (bones.head && rest.head) {
+      // x and z were set absolutely by sway above, so += is safe for micro offset.
+      // y is never set by sway, so use absolute assignment to prevent drift.
       bones.head.rotation.x += state.microNoise.x;
-      bones.head.rotation.y += state.microNoise.y;
+      bones.head.rotation.y = rest.head.y + state.microNoise.y;
       bones.head.rotation.z += state.microNoise.z;
     }
 
