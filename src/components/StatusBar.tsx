@@ -7,6 +7,7 @@
  * ============================================================================
  */
 
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { VoiceState } from '../types';
 
@@ -50,7 +51,7 @@ export default function StatusBar({
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-neon-purple" />
           <span className="text-holo-silver/60 uppercase tracking-wider">
-            DEVNET
+            {(import.meta.env.VITE_SOLANA_NETWORK || 'devnet').toUpperCase()}
           </span>
         </div>
       </div>
@@ -117,8 +118,6 @@ function VoiceStateIndicator({ state }: { state: VoiceState }) {
 // ============================================================================
 // Clock Component
 // ============================================================================
-
-import { useState, useEffect } from 'react';
 
 function Clock() {
   const [time, setTime] = useState(new Date());
