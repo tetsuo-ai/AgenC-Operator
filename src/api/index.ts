@@ -315,8 +315,13 @@ export const VoiceAPI = {
   },
 
   /**
-   * Get ephemeral token for voice WebSocket connection
-   * Token expires after 5 minutes - request a new one before expiry
+   * Get ephemeral token for voice WebSocket connection.
+   * The Rust backend exchanges the real API key for a short-lived session
+   * token so the raw key never reaches the browser. The token is passed
+   * via the Sec-WebSocket-Protocol header (required by x.ai realtime API)
+   * and expires after ~5 minutes. Request a new one before expiry.
+   *
+   * SECURITY: Never log the returned token value — log only its length.
    */
   getVoiceToken(): Promise<string> {
     return invoke<AsyncResult<string>>('get_voice_token')

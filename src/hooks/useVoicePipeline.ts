@@ -34,9 +34,9 @@ const GROK_WS_URL = 'wss://api.x.ai/v1/realtime';
 const SAMPLE_RATE = 24000;
 const MAX_AUDIO_QUEUE_SIZE = 200; // Cap buffered chunks to prevent unbounded memory growth
 
-// Debug flag - set to true to see WebSocket messages
-// WARNING: Keep false in production to avoid leaking session details in logs
-const DEBUG_WS = false;
+// Debug flag - enable via VITE_DEBUG env var or set manually for development
+// Kept off by default to avoid leaking sensitive protocol/session data to console
+const DEBUG_WS = !!import.meta.env.VITE_DEBUG;
 
 const TETSUO_SYSTEM_PROMPT = `You are Tetsuo, a cyberpunk AI operator for the AgenC protocol on Solana.
 You help users manage tasks on the blockchain, trade tokens, write code, and post to social media.
@@ -147,7 +147,7 @@ export function useVoicePipeline({
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const audioQueueRef = useRef<Float32Array[]>([]);
   const isPlayingRef = useRef(false);
   const currentTranscriptRef = useRef<string>('');
@@ -247,9 +247,11 @@ export function useVoicePipeline({
 
   const connectWebSocket = useCallback(async () => {
     // Get ephemeral token from Tauri backend (keeps API key secure)
+    // The real API key never leaves Rust — only a short-lived session token is returned
     let token: string;
     try {
       token = await TetsuoAPI.voice.getVoiceToken();
+      log.debug(`[Voice] Obtained ephemeral token (${token.length} chars)`);
     } catch (err) {
       onError(`${err}`);
       return;
@@ -260,9 +262,24 @@ export function useVoicePipeline({
         wsRef.current.close();
       }
 
-      // x.ai Realtime API - use ephemeral token for browser auth
-      // Token was obtained securely from backend using the API key
-      // x.ai is OpenAI API compatible - use same subprotocol auth pattern
+      // ================================================================
+      // SECURITY NOTE: WebSocket Authentication
+      // ================================================================
+      // The x.ai Realtime API uses the OpenAI-compatible subprotocol
+      // auth pattern. The token here is an EPHEMERAL session token
+      // obtained from the Tauri backend (not the raw API key). It has
+      // a short TTL (~5 min) and is single-use.
+      //
+      // The subprotocol header ("openai-insecure-api-key.*") IS visible
+      // in browser DevTools and Sec-WebSocket-Protocol request headers.
+      // This is acceptable because:
+      //   1. The token is ephemeral — it expires quickly
+      //   2. The real API key never leaves the Rust backend
+      //   3. This is the only auth method the x.ai realtime API supports
+      //
+      // Do NOT log the token value. If you need to debug auth, log
+      // only the token length or a prefix.
+      // ================================================================
       const ws = new WebSocket(
         GROK_WS_URL,
         ['realtime', `openai-insecure-api-key.${token}`, 'openai-beta.realtime-v1']
@@ -495,18 +512,21 @@ export function useVoicePipeline({
     const audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
     audioContextRef.current = audioContext;
 
-    const source = audioContext.createMediaStreamSource(stream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    processorRef.current = processor;
+    // Load AudioWorklet processor (runs off main thread)
+    await audioContext.audioWorklet.addModule(
+      new URL('../audio/pcm-capture-processor.ts', import.meta.url)
+    );
 
-    processor.onaudioprocess = (event) => {
+    const source = audioContext.createMediaStreamSource(stream);
+    const workletNode = new AudioWorkletNode(audioContext, 'pcm-capture-processor');
+    workletNodeRef.current = workletNode;
+
+    // Receive PCM16 buffers from the worklet and send over WebSocket
+    workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
-        const inputData = event.inputBuffer.getChannelData(0);
-        const pcm16 = float32ToPcm16(inputData);
-        const base64 = arrayBufferToBase64(pcm16.buffer as ArrayBuffer);
+        const base64 = arrayBufferToBase64(event.data);
 
-        // Send immediately - WebSocket handles buffering
         ws.send(JSON.stringify({
           type: 'input_audio_buffer.append',
           audio: base64,
@@ -514,10 +534,9 @@ export function useVoicePipeline({
       }
     };
 
-    source.connect(processor);
-    processor.connect(audioContext.destination);
+    source.connect(workletNode);
 
-    console.log('[Voice] Audio capture started');
+    log.info('[Voice] Audio capture started (AudioWorklet)');
   }, []);
 
   const stopAudioCapture = useCallback(() => {
@@ -526,9 +545,10 @@ export function useVoicePipeline({
       mediaStreamRef.current = null;
     }
 
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
+    if (workletNodeRef.current) {
+      workletNodeRef.current.port.close();
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
     }
 
     if (audioContextRef.current) {
@@ -536,7 +556,7 @@ export function useVoicePipeline({
       audioContextRef.current = null;
     }
 
-    console.log('[Voice] Audio capture stopped');
+    log.info('[Voice] Audio capture stopped');
   }, []);
 
   // ============================================================================
@@ -768,15 +788,6 @@ export function useVoicePipeline({
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-function float32ToPcm16(float32Array: Float32Array): Int16Array {
-  const pcm16 = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32Array[i]));
-    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return pcm16;
-}
 
 function base64ToFloat32(base64: string): Float32Array {
   const binary = atob(base64);
