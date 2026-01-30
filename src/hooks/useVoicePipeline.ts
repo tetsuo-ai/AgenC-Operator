@@ -40,8 +40,9 @@ import type {
 const GROK_WS_URL = 'wss://api.x.ai/v1/realtime';
 const SAMPLE_RATE = 24000;
 
-// Debug flag - set to true to see WebSocket messages
-const DEBUG_WS = true;
+// Debug flag - enable via VITE_DEBUG env var or set manually for development
+// Kept off by default to avoid leaking sensitive protocol/session data to console
+const DEBUG_WS = !!import.meta.env.VITE_DEBUG;
 
 const TETSUO_SYSTEM_PROMPT = `You are Tetsuo, a cyberpunk AI operator for the AgenC protocol on Solana.
 You help users manage tasks on the blockchain, trade tokens, write code, and post to social media.
@@ -252,9 +253,11 @@ export function useVoicePipeline({
 
   const connectWebSocket = useCallback(async () => {
     // Get ephemeral token from Tauri backend (keeps API key secure)
+    // The real API key never leaves Rust — only a short-lived session token is returned
     let token: string;
     try {
       token = await TetsuoAPI.voice.getVoiceToken();
+      log.debug(`[Voice] Obtained ephemeral token (${token.length} chars)`);
     } catch (err) {
       onError(`${err}`);
       return;
@@ -265,9 +268,24 @@ export function useVoicePipeline({
         wsRef.current.close();
       }
 
-      // x.ai Realtime API - use ephemeral token for browser auth
-      // Token was obtained securely from backend using the API key
-      // x.ai is OpenAI API compatible - use same subprotocol auth pattern
+      // ================================================================
+      // SECURITY NOTE: WebSocket Authentication
+      // ================================================================
+      // The x.ai Realtime API uses the OpenAI-compatible subprotocol
+      // auth pattern. The token here is an EPHEMERAL session token
+      // obtained from the Tauri backend (not the raw API key). It has
+      // a short TTL (~5 min) and is single-use.
+      //
+      // The subprotocol header ("openai-insecure-api-key.*") IS visible
+      // in browser DevTools and Sec-WebSocket-Protocol request headers.
+      // This is acceptable because:
+      //   1. The token is ephemeral — it expires quickly
+      //   2. The real API key never leaves the Rust backend
+      //   3. This is the only auth method the x.ai realtime API supports
+      //
+      // Do NOT log the token value. If you need to debug auth, log
+      // only the token length or a prefix.
+      // ================================================================
       const ws = new WebSocket(
         GROK_WS_URL,
         ['realtime', `openai-insecure-api-key.${token}`, 'openai-beta.realtime-v1']
