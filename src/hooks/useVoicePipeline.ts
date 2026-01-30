@@ -32,7 +32,7 @@ import type {
 
 const GROK_WS_URL = 'wss://api.x.ai/v1/realtime';
 const SAMPLE_RATE = 24000;
-const MAX_AUDIO_QUEUE_SIZE = 200; // Cap queued chunks to prevent unbounded memory growth
+const MAX_AUDIO_QUEUE_SIZE = 200; // Cap buffered chunks to prevent unbounded memory growth
 
 // Debug flag - set to true to see WebSocket messages
 // WARNING: Keep false in production to avoid leaking session details in logs
@@ -413,11 +413,9 @@ export function useVoicePipeline({
             : response.delta.audio;
           if (audioBase64) {
             const audioData = base64ToFloat32(audioBase64);
-            // Drop oldest chunks if queue exceeds limit
-            if (audioQueueRef.current.length >= MAX_AUDIO_QUEUE_SIZE) {
-              audioQueueRef.current.splice(0, audioQueueRef.current.length - MAX_AUDIO_QUEUE_SIZE + 1);
+            if (audioQueueRef.current.length < MAX_AUDIO_QUEUE_SIZE) {
+              audioQueueRef.current.push(audioData);
             }
-            audioQueueRef.current.push(audioData);
             // Non-blocking audio playback
             playAudioQueueNonBlocking();
           }
@@ -700,18 +698,13 @@ export function useVoicePipeline({
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       log.info('[Voice] WebSocket not connected, connecting...');
       await connectWebSocket();
-      // Wait for WebSocket to reach OPEN state (or timeout)
+      // Wait for the socket to actually open (up to 5s)
       await new Promise<void>((resolve) => {
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) { resolve(); return; }
-        let elapsed = 0;
-        const interval = setInterval(() => {
-          elapsed += 50;
-          if (wsRef.current?.readyState === WebSocket.OPEN || elapsed >= 5000) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 50);
+        const timeout = setTimeout(resolve, 5000);
+        const onOpen = () => { clearTimeout(timeout); resolve(); };
+        ws?.addEventListener('open', onOpen, { once: true });
       });
     }
 
