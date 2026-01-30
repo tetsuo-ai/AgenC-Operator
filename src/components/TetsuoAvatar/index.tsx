@@ -11,6 +11,7 @@
  */
 
 import { useState, useCallback, Suspense, lazy } from 'react';
+import { useProgress } from '@react-three/drei';
 import { ErrorBoundary } from './ErrorBoundary';
 import type { AgentAppearance, AgentStatus } from '../../types';
 import TetsuoAvatar2D from './TetsuoAvatar2D';
@@ -33,29 +34,99 @@ export const USE_3D_AVATAR = true;
 export interface TetsuoAvatarProps {
   appearance: AgentAppearance;
   status: AgentStatus;
-  onToggleCustomize: () => void;
-  isCustomizeOpen: boolean;
 }
 
 // ============================================================================
-// Loading Fallback
+// Loading Progress Component
 // ============================================================================
 
+/**
+ * Progress-aware loading indicator for the 129MB avatar model.
+ * Shows circular progress ring with percentage and status text.
+ */
 function AvatarLoadingFallback({ appearance }: { appearance: AgentAppearance }) {
+  const { progress, active } = useProgress();
+  const displayProgress = Math.round(progress);
+
+  // SVG circle parameters
+  const size = 120;
+  const strokeWidth = 4;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const offset = circumference - (progress / 100) * circumference;
+
   return (
-    <div className="w-[400px] h-[500px] flex items-center justify-center">
-      <div
-        className="w-32 h-32 rounded-full animate-pulse"
-        style={{
-          background: `radial-gradient(circle, ${appearance.accentColor}40 0%, transparent 70%)`,
-          boxShadow: `0 0 60px ${appearance.accentColor}40`,
-        }}
-      />
-      <div
-        className="absolute text-xs font-display uppercase tracking-widest"
-        style={{ color: appearance.accentColor }}
-      >
-        LOADING
+    <div className="w-[800px] h-[900px] flex flex-col items-center justify-center gap-4">
+      {/* Progress Ring */}
+      <div className="relative">
+        <svg
+          width={size}
+          height={size}
+          className="transform -rotate-90"
+        >
+          {/* Background circle */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={`${appearance.accentColor}20`}
+            strokeWidth={strokeWidth}
+            fill="none"
+          />
+          {/* Progress circle */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={appearance.accentColor}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            style={{
+              transition: 'stroke-dashoffset 0.3s ease-out',
+              filter: `drop-shadow(0 0 8px ${appearance.accentColor}80)`,
+            }}
+          />
+        </svg>
+
+        {/* Center content */}
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center"
+        >
+          <span
+            className="text-2xl font-display font-bold tabular-nums"
+            style={{ color: appearance.accentColor }}
+          >
+            {displayProgress}%
+          </span>
+        </div>
+
+        {/* Glow effect */}
+        <div
+          className="absolute inset-0 rounded-full opacity-30"
+          style={{
+            background: `radial-gradient(circle, ${appearance.accentColor}40 0%, transparent 70%)`,
+            animation: active ? 'pulse 2s ease-in-out infinite' : 'none',
+          }}
+        />
+      </div>
+
+      {/* Status text */}
+      <div className="flex flex-col items-center gap-1">
+        <span
+          className="text-xs font-display uppercase tracking-[0.3em]"
+          style={{ color: appearance.accentColor }}
+        >
+          {active ? 'Loading Avatar' : 'Initializing'}
+        </span>
+        <span
+          className="text-[10px] uppercase tracking-wider opacity-50"
+          style={{ color: appearance.accentColor }}
+        >
+          {active ? 'Please wait...' : 'Preparing renderer'}
+        </span>
       </div>
     </div>
   );
@@ -74,8 +145,6 @@ const LazyTetsuoAvatar3D = lazy(() => import('./TetsuoAvatar3D'));
 export default function TetsuoAvatar({
   appearance,
   status,
-  onToggleCustomize,
-  isCustomizeOpen,
 }: TetsuoAvatarProps) {
   const [has3DError, setHas3DError] = useState(false);
 
@@ -87,24 +156,8 @@ export default function TetsuoAvatar({
   // Determine which renderer to use
   const shouldUse3D = USE_3D_AVATAR && !has3DError;
 
-  // Click handler for toggling customize panel
-  const handleClick = useCallback(() => {
-    onToggleCustomize();
-  }, [onToggleCustomize]);
-
   return (
-    <div
-      className="relative cursor-pointer select-none"
-      onClick={handleClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          handleClick();
-        }
-      }}
-      aria-label="Toggle avatar customization"
-    >
+    <div className="relative select-none">
       {shouldUse3D ? (
         <ErrorBoundary onError={handle3DError} fallback={
           <TetsuoAvatar2D
@@ -139,14 +192,6 @@ export default function TetsuoAvatar({
           {appearance.nameplate}
         </div>
       </div>
-
-      {/* Customize Indicator (shown when panel is open) */}
-      {isCustomizeOpen && (
-        <div
-          className="absolute top-2 right-2 w-2 h-2 rounded-full animate-pulse"
-          style={{ backgroundColor: appearance.accentColor }}
-        />
-      )}
     </div>
   );
 }

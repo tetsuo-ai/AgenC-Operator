@@ -13,16 +13,9 @@
  */
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { TetsuoAPI, DebugAPI } from '../api';
+import { TetsuoAPI } from '../api';
 import { getGlobalMouthDriver, getGlobalAudioContext } from '../utils/mouthDriver';
-
-// Helper to log to both console and terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-  warn: (msg: string) => { console.warn(msg); DebugAPI.warn(msg); },
-  error: (msg: string) => { console.error(msg); DebugAPI.error(msg); },
-};
+import { log } from '../utils/log';
 import type {
   VoiceState,
   ChatMessage,
@@ -39,6 +32,7 @@ import type {
 
 const GROK_WS_URL = 'wss://api.x.ai/v1/realtime';
 const SAMPLE_RATE = 24000;
+const MAX_AUDIO_QUEUE_SIZE = 200; // Cap buffered chunks to prevent unbounded memory growth
 
 // Debug flag - enable via VITE_DEBUG env var or set manually for development
 // Kept off by default to avoid leaking sensitive protocol/session data to console
@@ -436,7 +430,9 @@ export function useVoicePipeline({
             : response.delta.audio;
           if (audioBase64) {
             const audioData = base64ToFloat32(audioBase64);
-            audioQueueRef.current.push(audioData);
+            if (audioQueueRef.current.length < MAX_AUDIO_QUEUE_SIZE) {
+              audioQueueRef.current.push(audioData);
+            }
             // Non-blocking audio playback
             playAudioQueueNonBlocking();
           }
@@ -722,8 +718,14 @@ export function useVoicePipeline({
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       log.info('[Voice] WebSocket not connected, connecting...');
       await connectWebSocket();
-      // Wait a bit for connection to establish
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for the socket to actually open (up to 5s)
+      await new Promise<void>((resolve) => {
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) { resolve(); return; }
+        const timeout = setTimeout(resolve, 5000);
+        const onOpen = () => { clearTimeout(timeout); resolve(); };
+        ws?.addEventListener('open', onOpen, { once: true });
+      });
     }
 
     const wsState = wsRef.current?.readyState;

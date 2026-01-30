@@ -7,6 +7,7 @@
  * ============================================================================
  */
 
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { VoiceState } from '../types';
 
@@ -14,12 +15,14 @@ interface StatusBarProps {
   voiceState: VoiceState;
   isConnected: boolean;
   error: string | null;
+  network?: string;
 }
 
 export default function StatusBar({
   voiceState,
   isConnected,
   error,
+  network = 'DEVNET',
 }: StatusBarProps) {
   return (
     <div className="h-7 bg-cyber-darker/90 border-t border-neon-cyan/10 flex items-center justify-between px-4 text-[10px] font-mono">
@@ -50,7 +53,7 @@ export default function StatusBar({
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-neon-purple" />
           <span className="text-holo-silver/60 uppercase tracking-wider">
-            DEVNET
+            {network}
           </span>
         </div>
       </div>
@@ -117,8 +120,6 @@ function VoiceStateIndicator({ state }: { state: VoiceState }) {
 // ============================================================================
 // Clock Component
 // ============================================================================
-
-import { useState, useEffect } from 'react';
 
 function Clock() {
   const [time, setTime] = useState(new Date());

@@ -13,13 +13,7 @@
  *   const mouthOpen = driver.getMouthOpen();
  */
 
-import { DebugAPI } from '../api';
-
-// Helper to log to terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-};
+import { log } from './log';
 
 // ============================================================================
 // Configuration
@@ -46,13 +40,13 @@ export interface MouthDriverConfig {
 
 const DEFAULT_CONFIG: MouthDriverConfig = {
   fftSize: 256,
-  smoothingTimeConstant: 0.5,
+  smoothingTimeConstant: 0.6,
   noiseGate: 0.01,
   minRms: 0.02,
-  maxRms: 0.5,
+  maxRms: 0.45,
   outputSmoothing: 0.3,
-  attackSpeed: 0.5,
-  decaySpeed: 0.15,
+  attackSpeed: 0.35,
+  decaySpeed: 0.2,
 };
 
 // ============================================================================
@@ -62,7 +56,7 @@ const DEFAULT_CONFIG: MouthDriverConfig = {
 export class MouthDriver {
   private analyser: AnalyserNode;
   private gainNode: GainNode;
-  private timeDomainData: Float32Array<ArrayBuffer>;
+  private timeDomainData: Float32Array;
   private currentValue: number = 0;
   private config: MouthDriverConfig;
 
@@ -91,7 +85,7 @@ export class MouthDriver {
     this.gainNode.connect(this.analyser);
 
     // Allocate buffer for time domain data
-    this.timeDomainData = new Float32Array(this.analyser.fftSize) as Float32Array<ArrayBuffer>;
+    this.timeDomainData = new Float32Array(this.analyser.fftSize);
 
     // Expose nodes
     this.inputNode = this.gainNode;
@@ -136,11 +130,13 @@ export class MouthDriver {
     // Apply noise gate
     const gatedRms = rms < this.config.noiseGate ? 0 : rms;
 
-    // Normalize to 0..1 range
-    const normalized = Math.min(
+    // Normalize to 0..1 range with power curve for natural speech response
+    const linear = Math.min(
       1,
       Math.max(0, (gatedRms - this.config.minRms) / (this.config.maxRms - this.config.minRms))
     );
+    // Power curve: soft sounds → small openings, loud → wide (more expressive range)
+    const normalized = Math.pow(linear, 0.7);
 
     // Apply asymmetric smoothing (fast attack, slow decay)
     const speed = normalized > this.currentValue
@@ -180,7 +176,7 @@ export class MouthDriver {
     this.config = { ...this.config, ...config };
     if (config.fftSize) {
       this.analyser.fftSize = config.fftSize;
-      this.timeDomainData = new Float32Array(this.analyser.fftSize) as Float32Array<ArrayBuffer>;
+      this.timeDomainData = new Float32Array(this.analyser.fftSize);
     }
     if (config.smoothingTimeConstant !== undefined) {
       this.analyser.smoothingTimeConstant = config.smoothingTimeConstant;
