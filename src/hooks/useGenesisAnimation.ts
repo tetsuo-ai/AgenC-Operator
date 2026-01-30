@@ -15,6 +15,7 @@
 import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { log } from '../utils/log';
+import { MODEL_CONFIG } from '../config/modelConfig';
 
 // ============================================================================
 // Configuration
@@ -58,47 +59,48 @@ const DEFAULT_CONFIG: GenesisAnimationConfig = {
 };
 
 // ============================================================================
-// Genesis 9 Bone Names (EXACT matches)
+// Bone Patterns (sourced from shared modelConfig)
 // ============================================================================
 
-const GENESIS9_BONES = {
-  // Spine chain (bottom to top)
-  pelvis: 'pelvis',
-  spine1: 'spine1',
-  spine2: 'spine2',
-  spine3: 'spine3',
-  spine4: 'spine4',  // chest
+const sk = MODEL_CONFIG.skeleton;
+const BONE_PATTERNS: Record<keyof BoneRefs, RegExp[]> = {
+  // Spine chain (bottom to top) - indexed from modelConfig spine array
+  pelvis: [sk.spine[0]],     // /^pelvis$/i
+  spine1: [sk.spine[1]],     // /^spine1$/i
+  spine2: [sk.spine[2]],     // /^spine2$/i
+  spine3: [sk.spine[3]],     // /^spine3$/i
+  spine4: [sk.spine[4]],     // /^spine4$/i (chest)
 
   // Head/Neck
-  neck1: 'neck1',
-  neck2: 'neck2',
-  head: 'head',
+  neck1: [sk.neck[0]],       // /^neck1$/i
+  neck2: [sk.neck[1]],       // /^neck2$/i
+  head: sk.head,
 
   // Jaw
-  jaw: 'lowerjaw',
+  jaw: sk.jaw,
 
   // Eyes
-  eyeL: 'l_eye',
-  eyeR: 'r_eye',
+  eyeL: sk.eyes.left,
+  eyeR: sk.eyes.right,
 
   // Eyelids
-  eyelidUpperL: 'l_eyelidupper',
-  eyelidUpperR: 'r_eyelidupper',
-  eyelidLowerL: 'l_eyelidlower',
-  eyelidLowerR: 'r_eyelidlower',
+  eyelidUpperL: sk.eyelids.upperL,
+  eyelidUpperR: sk.eyelids.upperR,
+  eyelidLowerL: sk.eyelids.lowerL,
+  eyelidLowerR: sk.eyelids.lowerR,
 
   // Shoulders
-  shoulderL: 'l_shoulder',
-  shoulderR: 'r_shoulder',
+  shoulderL: sk.shoulders.left,
+  shoulderR: sk.shoulders.right,
 
   // Upper arms
-  upperArmL: 'l_upperarm',
-  upperArmR: 'r_upperarm',
+  upperArmL: sk.upperArms.left,
+  upperArmR: sk.upperArms.right,
 
   // Forearms
-  foreArmL: 'l_forearm',
-  foreArmR: 'r_forearm',
-} as const;
+  foreArmL: sk.forearms.left,
+  foreArmR: sk.forearms.right,
+};
 
 // ============================================================================
 // Types
@@ -203,22 +205,26 @@ export function useGenesisAnimation(
     const found: string[] = [];
     const missing: string[] = [];
 
-    // Traverse scene and find bones by exact name
+    // Traverse scene and find bones by pattern matching
     scene.traverse((obj) => {
       if (!(obj instanceof THREE.Bone)) return;
 
-      // Check each bone slot (case-insensitive to handle GLB export variations)
-      for (const [slot, targetName] of Object.entries(GENESIS9_BONES)) {
-        if (obj.name.toLowerCase() === targetName.toLowerCase() && bonesRef.current[slot as keyof BoneRefs] === null) {
-          bonesRef.current[slot as keyof BoneRefs] = obj;
-          restPosesRef.current[slot] = obj.rotation.clone();
-          found.push(`${slot} -> "${obj.name}"`);
+      // Check each bone slot against shared modelConfig patterns
+      for (const [slot, patterns] of Object.entries(BONE_PATTERNS)) {
+        if (bonesRef.current[slot as keyof BoneRefs] !== null) continue;
+        for (const pattern of patterns as RegExp[]) {
+          if (pattern.test(obj.name)) {
+            bonesRef.current[slot as keyof BoneRefs] = obj;
+            restPosesRef.current[slot] = obj.rotation.clone();
+            found.push(`${slot} -> "${obj.name}"`);
+            break;
+          }
         }
       }
     });
 
     // Check what's missing
-    for (const slot of Object.keys(GENESIS9_BONES)) {
+    for (const slot of Object.keys(BONE_PATTERNS)) {
       if (bonesRef.current[slot as keyof BoneRefs] === null) {
         missing.push(slot);
       }

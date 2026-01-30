@@ -9,6 +9,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Markdown from 'react-markdown';
 import type { ChatMessage, VoiceState } from '../types';
 
 interface ChatPanelProps {
@@ -219,7 +220,38 @@ function ChatBubble({ message }: ChatBubbleProps) {
               : 'polygon(0 0, 100% 0, 100% 100%, 6px 100%, 0 calc(100% - 6px))',
           }}
         >
-          {message.content}
+          <Markdown
+            components={{
+              p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+              strong: ({ children }) => <strong className="text-neon-cyan font-bold">{children}</strong>,
+              em: ({ children }) => <em className="text-neon-magenta/90 italic">{children}</em>,
+              code: ({ children }) => (
+                <code className="bg-cyber-dark/60 border border-holo-silver/20 rounded px-1 py-0.5 text-xs text-neon-green font-mono">
+                  {children}
+                </code>
+              ),
+              pre: ({ children }) => (
+                <pre className="bg-cyber-dark/80 border border-holo-silver/20 rounded p-2 my-1 overflow-x-auto text-xs">
+                  {children}
+                </pre>
+              ),
+              a: ({ href, children }) => (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-neon-cyan underline hover:text-neon-cyan/80 transition-colors"
+                >
+                  {children}
+                </a>
+              ),
+              ul: ({ children }) => <ul className="list-disc list-inside ml-2 mb-1">{children}</ul>,
+              ol: ({ children }) => <ol className="list-decimal list-inside ml-2 mb-1">{children}</ol>,
+              li: ({ children }) => <li className="mb-0.5">{children}</li>,
+            }}
+          >
+            {message.content}
+          </Markdown>
 
           {/* Execution Result Badge */}
           {message.result && (
@@ -232,7 +264,7 @@ function ChatBubble({ message }: ChatBubbleProps) {
               <span className={message.result.success ? 'text-neon-green' : 'text-red-400'}>
                 {message.result.success ? '✓ Success' : '✗ Failed'}
               </span>
-              {message.result.signature && (
+              {message.result.signature && typeof message.result.signature === 'string' && (
                 <div className="mt-1 text-holo-silver/50 truncate">
                   TX: {message.result.signature.slice(0, 16)}...
                 </div>

@@ -16,6 +16,7 @@
 
 import { useRef, useCallback, useEffect, useState } from 'react';
 import * as THREE from 'three';
+import { MODEL_CONFIG } from '../config/modelConfig';
 import {
   MouthDriver,
   getGlobalMouthDriver,
@@ -115,15 +116,16 @@ interface LipBoneRestPoses {
   [key: string]: THREE.Euler;
 }
 
+const face = MODEL_CONFIG.skeleton.face;
 const LIP_BONE_PATTERNS: Record<keyof LipBoneRefs, RegExp[]> = {
-  centerUpper: [/^center_lipupper$/i, /^centerlipupper$/i, /^mid_lipupper$/i],
-  centerLower: [/^center_liplower$/i, /^centerliplower$/i, /^mid_liplower$/i],
-  upperL: [/^l_lipupper$/i, /^lipUpperL$/i],
-  upperR: [/^r_lipupper$/i, /^lipUpperR$/i],
-  lowerL: [/^l_liplower$/i, /^lipLowerL$/i],
-  lowerR: [/^r_liplower$/i, /^lipLowerR$/i],
-  cornerL: [/^l_lipcorner$/i, /^lipCornerL$/i],
-  cornerR: [/^r_lipcorner$/i, /^lipCornerR$/i],
+  centerUpper: face.lipUpperCenter,
+  centerLower: face.lipLowerCenter,
+  upperL: face.lipUpperL,
+  upperR: face.lipUpperR,
+  lowerL: face.lipLowerL,
+  lowerR: face.lipLowerR,
+  cornerL: face.lipCornerL,
+  cornerR: face.lipCornerR,
 };
 
 // ============================================================================

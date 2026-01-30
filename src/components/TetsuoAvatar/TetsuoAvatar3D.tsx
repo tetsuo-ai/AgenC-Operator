@@ -64,8 +64,21 @@ const CONFIG = {
   // Post-processing settings
   BLOOM_INTENSITY: 0.3,           // Subtle bloom for highlights
   BLOOM_LUMINANCE_THRESHOLD: 0.8, // Only bright areas bloom
-  VIGNETTE_DARKNESS: 0.4,         // Edge darkening
+  VIGNETTE_DARKNESS: 0.25,        // Edge darkening (softened from 0.4)
   VIGNETTE_OFFSET: 0.3,           // Vignette falloff
+
+  // Lighting
+  KEY_LIGHT_INTENSITY: 0.75,      // Main light (softened from 1.0)
+  KEY_LIGHT_COLOR: '#fff5e6',
+  FILL_LIGHT_INTENSITY: 0.55,     // Fill (raised from 0.4 to reduce contrast)
+  FILL_LIGHT_COLOR: '#fff8f0',
+  RIM_LIGHT_INTENSITY: 0.25,
+  RIM_LIGHT_COLOR: '#ffe8d6',
+  FACE_SPOT_INTENSITY: 0.2,       // Face spotlight (reduced from 0.5)
+  FACE_SPOT_COLOR: '#fff5e6',
+  AMBIENT_INTENSITY: 0.35,
+  ENVIRONMENT_PRESET: 'apartment' as const, // Softer than "studio"
+  TONE_MAPPING_EXPOSURE: 1.15,    // Slightly brighter (raised from 1.05)
 
   // Debug
   DEBUG_ANIMATIONS: false,        // Log animation state (enable for troubleshooting)
@@ -102,6 +115,7 @@ interface MaterialRef {
   category: MaterialCategory;
   originalColor: THREE.Color;
   originalEmissive: THREE.Color;
+  isEyeballTexture: boolean; // True for sclera/iris that should keep their baked look
   originalEmissiveIntensity: number;
 }
 
@@ -153,11 +167,14 @@ function applyAppearance(
           ? child.material.map((m, i) => i === idx ? cloned : m)
           : cloned;
 
+        const category = categorizeMesh(child.name, mat.name);
+        const meshMatName2 = `${child.name} ${mat.name || ''}`.toLowerCase();
         ref = {
           material: cloned,
-          category: categorizeMesh(child.name, mat.name),
+          category,
           originalColor: mat.color.clone(),
           originalEmissive: mat.emissive?.clone() || new THREE.Color(0),
+          isEyeballTexture: category === 'eye' && /sclera|iris/i.test(meshMatName2) && !!cloned.map,
           originalEmissiveIntensity: mat.emissiveIntensity ?? 0,
         };
         materialRefs.set(key, ref);
@@ -183,9 +200,8 @@ function applyAppearance(
           material.roughness = 0.1;
           material.metalness = 0;
 
-          // Eyeball meshes with baked textures: preserve texture, no emissive tint
-          const isEyeball = /^eye\s*(left|right)$/i.test(mat.name || '');
-          if (isEyeball && material.map) {
+          // Sclera/iris meshes with baked textures: preserve texture, no emissive tint
+          if (ref.isEyeballTexture) {
             material.color.setHex(0xffffff);
             material.emissive.setHex(0x000000);
             material.emissiveIntensity = 0;
@@ -245,8 +261,8 @@ function updateEyeGlow(
 
   materialRefs.forEach((ref) => {
     if (ref.category === 'eye') {
-      // Skip eyeball meshes with baked textures (no emissive tint)
-      if (ref.material.map && ref.material.emissiveIntensity === 0) return;
+      // Skip sclera/iris meshes with baked textures (no emissive tint)
+      if (ref.isEyeballTexture) return;
 
       const baseIntensity = CONFIG.EMISSIVE_BASE_INTENSITY * intensity;
       if (isActive) {
@@ -418,7 +434,17 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
             stdMat.opacity = 0;
             stdMat.depthWrite = false;
             stdMat.needsUpdate = true;
+            child.renderOrder = 10; // Render after eyeball geometry
             return;
+          }
+
+          // Eyeball geometry (iris/sclera/pupil): fix z-fighting between layers
+          const isEyeGeometry = /iris|pupil|sclera/i.test(meshMatName);
+          if (isEyeGeometry) {
+            stdMat.polygonOffset = true;
+            stdMat.polygonOffsetFactor = -1;
+            stdMat.polygonOffsetUnits = -1;
+            child.renderOrder = 5;
           }
 
           // Hair materials - preserve ALL original settings from the GLB.
@@ -759,7 +785,7 @@ export default function TetsuoAvatar3D({
         gl={{
           antialias: true,
           toneMapping: THREE.NeutralToneMapping,
-          toneMappingExposure: 1.05,
+          toneMappingExposure: CONFIG.TONE_MAPPING_EXPOSURE,
           outputColorSpace: THREE.SRGBColorSpace,
         }}
       >
@@ -768,41 +794,41 @@ export default function TetsuoAvatar3D({
 
         {/* ============ WARM LIGHTING SETUP ============ */}
 
-        {/* Key Light - Warm, brighter for high-res rendering */}
+        {/* Key Light - Warm, softened for natural skin rendering */}
         <directionalLight
           position={[80, 180, 120]}
-          intensity={1.0}
-          color="#fff5e6"
+          intensity={CONFIG.KEY_LIGHT_INTENSITY}
+          color={CONFIG.KEY_LIGHT_COLOR}
         />
 
-        {/* Fill Light - Warm, slightly stronger */}
+        {/* Fill Light - Raised to reduce harsh contrast */}
         <directionalLight
           position={[-80, 120, 80]}
-          intensity={0.4}
-          color="#fff8f0"
+          intensity={CONFIG.FILL_LIGHT_INTENSITY}
+          color={CONFIG.FILL_LIGHT_COLOR}
         />
 
         {/* Rim Light - Warm edge definition */}
         <directionalLight
           position={[0, 140, -80]}
-          intensity={0.25}
-          color="#ffe8d6"
+          intensity={CONFIG.RIM_LIGHT_INTENSITY}
+          color={CONFIG.RIM_LIGHT_COLOR}
         />
 
-        {/* Face-focused SpotLight for definition */}
+        {/* Face-focused SpotLight - subtle definition */}
         <spotLight
           position={[0, 180, 100]}
           angle={0.3}
           penumbra={0.8}
-          intensity={0.5}
-          color="#fff5e6"
+          intensity={CONFIG.FACE_SPOT_INTENSITY}
+          color={CONFIG.FACE_SPOT_COLOR}
         />
 
         {/* Ambient fill */}
-        <ambientLight intensity={0.35} />
+        <ambientLight intensity={CONFIG.AMBIENT_INTENSITY} />
 
-        {/* Studio Environment for controlled, better skin rendering */}
-        <Environment preset="studio" background={false} />
+        {/* Apartment environment for softer, warmer ambient light */}
+        <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} />
 
         {/* The reactive model */}
         <ReactiveModel appearance={appearance} status={status} />

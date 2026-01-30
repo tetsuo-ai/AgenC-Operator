@@ -16,6 +16,7 @@ import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { stripMorphPrefix } from '../utils/glbInspector';
 import { log } from '../utils/log';
+import { MODEL_CONFIG } from '../config/modelConfig';
 
 // ============================================================================
 // Configuration
@@ -149,23 +150,21 @@ export interface UseIdleAnimationReturn {
 // Bone Name Patterns
 // ============================================================================
 
+const sk = MODEL_CONFIG.skeleton;
 const BONE_PATTERNS: Record<keyof BoneRefs, RegExp[]> = {
-  // Victoria 9 / Genesis 9 skeleton uses: spine1, spine2, spine3, spine4
-  spine: [/^spine1$/i, /^spine$/i, /^Spine$/],
-  spine1: [/^spine2$/i, /^spine[._]?1$/i, /^Spine1$/i],
-  spine2: [/^spine3$/i, /^spine[._]?2$/i, /^Spine2$/i],
-  chest: [/^spine4$/i, /^chest$/i, /^Chest$/i, /^chestUpper$/i, /^chestLower$/i],
-  // Victoria 9 uses: neck1, neck2
-  neck: [/^neck1$/i, /^neck2$/i, /^neck$/i, /^Neck$/i, /^neckLower$/i, /^neckUpper$/i],
-  head: [/^head$/i, /^Head$/],
-  // Victoria 9 uses: l_shoulder, r_shoulder
-  shoulderL: [/^l_shoulder$/i, /^lCollar$/i, /^Left[_]?shoulder$/i, /^shoulder[_]?l$/i],
-  shoulderR: [/^r_shoulder$/i, /^rCollar$/i, /^Right[_]?shoulder$/i, /^shoulder[_]?r$/i],
-  // Victoria 9 uses: l_upperarm, r_upperarm
-  upperArmL: [/^l_upperarm$/i, /^lShldrBend$/i, /^Left[_]?arm$/i, /^upperarm[_]?l$/i],
-  upperArmR: [/^r_upperarm$/i, /^rShldrBend$/i, /^Right[_]?arm$/i, /^upperarm[_]?r$/i],
-  // Victoria 9 uses: pelvis, hip
-  hips: [/^pelvis$/i, /^hip$/i, /^hips$/i, /^Hips$/i],
+  // Spine segments: hook names map to Genesis 9 spine1->spine4
+  // (hook "spine" = Genesis spine1, hook "chest" = Genesis spine4)
+  spine: [/^spine1$/i, /^spine$/i],
+  spine1: [/^spine2$/i],
+  spine2: [/^spine3$/i],
+  chest: [/^spine4$/i, /^chest$/i, /^chestUpper$/i, /^chestLower$/i],
+  neck: sk.neck,
+  head: sk.head,
+  shoulderL: [...sk.shoulders.left, /^Left[_]?shoulder$/i],
+  shoulderR: [...sk.shoulders.right, /^Right[_]?shoulder$/i],
+  upperArmL: [...sk.upperArms.left, /^Left[_]?arm$/i],
+  upperArmR: [...sk.upperArms.right, /^Right[_]?arm$/i],
+  hips: sk.hips,
 };
 
 // ============================================================================
@@ -262,19 +261,11 @@ export function useIdleAnimation(
           // Look for eyes closed morph target
           // Patterns include Genesis 9 / Victoria 9 FACS naming
           if (!morphRef.current) {
+            const eyeBlink = MODEL_CONFIG.morphTargets.eyeBlink;
             const eyesClosedPatterns = [
-              /^Eyes[_]?closed$/i,
-              /^eyesClosed$/i,
-              /^blink$/i,
-              // Genesis 9 / Victoria 9 FACS patterns
-              /facs_bs_EyeBlinkL$/i,
-              /facs_bs_EyeBlinkR$/i,
-              /facs_bs_EyeBlink_L$/i,
-              /facs_bs_EyeBlink_R$/i,
-              /eCTRLEyesClosedL$/i,
-              /eCTRLEyesClosedR$/i,
-              /eCTRLEyesClosed$/i,
-              /facs_ctrl_EyesClosed$/i,
+              ...eyeBlink.both,
+              ...eyeBlink.left,
+              ...eyeBlink.right,
             ];
             for (const [name, index] of Object.entries(dict)) {
               // Test both original name and prefix-stripped name
@@ -308,12 +299,12 @@ export function useIdleAnimation(
       }
     }
 
-    // Find eyelid bones - Victoria 9 uses: l_eyelidupper, l_eyelidlower, r_eyelidupper, r_eyelidlower
+    // Find eyelid bones (patterns from shared modelConfig)
     const eyelidPatterns = {
-      topL: [/^l_eyelidupper$/i, /^Eyelid[_]?Top[_]?l$/i, /^eyelidTopL$/i, /^lEyelidUpper$/i],
-      topR: [/^r_eyelidupper$/i, /^Eyelid[_]?Top[_]?r$/i, /^eyelidTopR$/i, /^rEyelidUpper$/i],
-      botL: [/^l_eyelidlower$/i, /^Eyelid[_]?Bot[_]?l$/i, /^eyelidBotL$/i, /^lEyelidLower$/i],
-      botR: [/^r_eyelidlower$/i, /^Eyelid[_]?Bot[_]?r$/i, /^eyelidBotR$/i, /^rEyelidLower$/i],
+      topL: sk.eyelids.upperL,
+      topR: sk.eyelids.upperR,
+      botL: sk.eyelids.lowerL,
+      botR: sk.eyelids.lowerR,
     };
 
     const eyelids: EyelidBones = {};
