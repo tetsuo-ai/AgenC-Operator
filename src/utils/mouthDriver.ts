@@ -62,7 +62,7 @@ const DEFAULT_CONFIG: MouthDriverConfig = {
 export class MouthDriver {
   private analyser: AnalyserNode;
   private gainNode: GainNode;
-  private timeDomainData: Float32Array<ArrayBuffer>;
+  private timeDomainData: Float32Array;
   private currentValue: number = 0;
   private config: MouthDriverConfig;
 
@@ -91,7 +91,7 @@ export class MouthDriver {
     this.gainNode.connect(this.analyser);
 
     // Allocate buffer for time domain data
-    this.timeDomainData = new Float32Array(this.analyser.fftSize) as Float32Array<ArrayBuffer>;
+    this.timeDomainData = new Float32Array(this.analyser.fftSize);
 
     // Expose nodes
     this.inputNode = this.gainNode;
@@ -180,7 +180,7 @@ export class MouthDriver {
     this.config = { ...this.config, ...config };
     if (config.fftSize) {
       this.analyser.fftSize = config.fftSize;
-      this.timeDomainData = new Float32Array(this.analyser.fftSize) as Float32Array<ArrayBuffer>;
+      this.timeDomainData = new Float32Array(this.analyser.fftSize);
     }
     if (config.smoothingTimeConstant !== undefined) {
       this.analyser.smoothingTimeConstant = config.smoothingTimeConstant;
