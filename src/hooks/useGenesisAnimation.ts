@@ -14,13 +14,7 @@
 
 import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { DebugAPI } from '../api';
-
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-  warn: (msg: string) => { console.warn(msg); DebugAPI.warn(msg); },
-};
+import { log } from '../utils/log';
 
 // ============================================================================
 // Configuration
@@ -44,6 +38,9 @@ export interface GenesisAnimationConfig {
   enableBreathing: boolean;
   enableBlinking: boolean;
   enableHeadNod: boolean;
+
+  // T-pose correction: set false if model already has a custom pose from Blender
+  enableTPoseCorrection: boolean;
 }
 
 const DEFAULT_CONFIG: GenesisAnimationConfig = {
@@ -57,6 +54,7 @@ const DEFAULT_CONFIG: GenesisAnimationConfig = {
   enableBreathing: true,
   enableBlinking: true,
   enableHeadNod: true,
+  enableTPoseCorrection: true,
 };
 
 // ============================================================================
@@ -238,53 +236,45 @@ export function useGenesisAnimation(
     // ========================================================================
     // Genesis 9 models often have a T-pose bind pose. Apply corrective
     // rotations to bring arms to a natural resting position.
+    // Disable with enableTPoseCorrection: false if model has custom Blender pose.
     // ========================================================================
 
     const bones = bonesRef.current;
+    const cfg = configRef.current;
     const armL = bones.upperArmL;
     const armR = bones.upperArmR;
 
     if (armL && armR) {
-      // Check if arms appear to be in T-pose (Z rotation near 0 = arms horizontal)
-      const armAngleThreshold = 0.3; // ~17 degrees
-      const leftArmZAbs = Math.abs(armL.rotation.z);
-      const rightArmZAbs = Math.abs(armR.rotation.z);
-
       log.info(`[GenesisAnimation] Arm rotations - L: x=${armL.rotation.x.toFixed(3)} y=${armL.rotation.y.toFixed(3)} z=${armL.rotation.z.toFixed(3)}`);
       log.info(`[GenesisAnimation] Arm rotations - R: x=${armR.rotation.x.toFixed(3)} y=${armR.rotation.y.toFixed(3)} z=${armR.rotation.z.toFixed(3)}`);
 
-      if (leftArmZAbs < armAngleThreshold && rightArmZAbs < armAngleThreshold) {
-        log.info('[GenesisAnimation] T-pose detected! Applying arm correction...');
+      if (cfg.enableTPoseCorrection) {
+        // Check if arms appear to be in T-pose (Z rotation near 0 = arms horizontal)
+        const armAngleThreshold = 0.3; // ~17 degrees
+        const leftArmZAbs = Math.abs(armL.rotation.z);
+        const rightArmZAbs = Math.abs(armR.rotation.z);
 
-        // Rotate upper arms down ~65 degrees (1.13 radians)
-        const armDownAngle = 1.13;
-        armL.rotation.z += armDownAngle;   // Left arm: positive Z = down
-        armR.rotation.z -= armDownAngle;   // Right arm: negative Z = down
+        if (leftArmZAbs < armAngleThreshold && rightArmZAbs < armAngleThreshold) {
+          log.info('[GenesisAnimation] T-pose detected! Applying arm correction...');
 
-        // Slight forward rotation for natural pose
-        armL.rotation.x += 0.1;
-        armR.rotation.x += 0.1;
+          // Rotate upper arms down 90 degrees (π/2 radians) - arms flat at sides
+          const armDownAngle = Math.PI / 2;
+          armL.rotation.z += armDownAngle;   // Left arm: positive Z = down
+          armR.rotation.z -= armDownAngle;   // Right arm: negative Z = down
 
-        // Forearm: slight bend for relaxed look
-        if (bones.foreArmL) {
-          bones.foreArmL.rotation.x += 0.15;
+          // Re-capture corrected rotations as new rest poses
+          restPosesRef.current.upperArmL = armL.rotation.clone();
+          restPosesRef.current.upperArmR = armR.rotation.clone();
+
+          log.info('[GenesisAnimation] Arm correction applied - arms flat at sides');
+        } else {
+          log.info('[GenesisAnimation] Arms not in T-pose - no correction needed');
         }
-        if (bones.foreArmR) {
-          bones.foreArmR.rotation.x += 0.15;
-        }
-
-        // Re-capture corrected rotations as new rest poses
-        restPosesRef.current.upperArmL = armL.rotation.clone();
-        restPosesRef.current.upperArmR = armR.rotation.clone();
-        if (bones.foreArmL) restPosesRef.current.foreArmL = bones.foreArmL.rotation.clone();
-        if (bones.foreArmR) restPosesRef.current.foreArmR = bones.foreArmR.rotation.clone();
-
-        log.info('[GenesisAnimation] Arm correction applied - arms moved to natural rest position');
       } else {
-        log.info('[GenesisAnimation] Arms not in T-pose - no correction needed');
+        log.info('[GenesisAnimation] T-pose correction disabled - preserving Blender export pose');
       }
     } else {
-      log.warn('[GenesisAnimation] Upper arm bones not found - cannot correct T-pose');
+      log.warn('[GenesisAnimation] Upper arm bones not found - cannot check arm pose');
     }
 
     // ========================================================================
@@ -446,7 +436,8 @@ export function useGenesisAnimation(
 
     // Jaw - opens based on mouthOpen value (0-1)
     // Genesis 9 jaw: negative X rotation opens mouth
-    if (bones.jaw && rest.jaw) {
+    // Skip when jawOpenAmount is 0 - another system (useMouthAnimation) drives the jaw
+    if (cfg.jawOpenAmount > 0 && bones.jaw && rest.jaw) {
       const targetJaw = rest.jaw.x - mouthOpen * cfg.jawOpenAmount;
       bones.jaw.rotation.x = THREE.MathUtils.lerp(
         bones.jaw.rotation.x,

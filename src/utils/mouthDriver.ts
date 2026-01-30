@@ -13,13 +13,7 @@
  *   const mouthOpen = driver.getMouthOpen();
  */
 
-import { DebugAPI } from '../api';
-
-// Helper to log to terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-};
+import { log } from './log';
 
 // ============================================================================
 // Configuration

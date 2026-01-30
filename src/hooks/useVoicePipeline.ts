@@ -13,16 +13,9 @@
  */
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { TetsuoAPI, DebugAPI } from '../api';
+import { TetsuoAPI } from '../api';
 import { getGlobalMouthDriver, getGlobalAudioContext } from '../utils/mouthDriver';
-
-// Helper to log to both console and terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-  warn: (msg: string) => { console.warn(msg); DebugAPI.warn(msg); },
-  error: (msg: string) => { console.error(msg); DebugAPI.error(msg); },
-};
+import { log } from '../utils/log';
 import type {
   VoiceState,
   ChatMessage,

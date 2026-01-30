@@ -30,23 +30,12 @@ import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
 import { SkeletonUtils } from "three-stdlib";
 import { useEffect, useMemo, useRef, lazy, Suspense } from "react";
 
-// Lazy load post-processing to make it optional
+// Post-processing components (disabled - @react-three/postprocessing not installed)
 // Run `npm install @react-three/postprocessing postprocessing` to enable
-let EffectComposer: React.ComponentType<{ children: React.ReactNode }> | null = null;
-let Bloom: React.ComponentType<Record<string, unknown>> | null = null;
-let Vignette: React.ComponentType<Record<string, unknown>> | null = null;
-let SMAA: React.ComponentType | null = null;
-
-try {
-  // Dynamic import will fail gracefully if not installed
-  const postprocessing = require("@react-three/postprocessing");
-  EffectComposer = postprocessing.EffectComposer;
-  Bloom = postprocessing.Bloom;
-  Vignette = postprocessing.Vignette;
-  SMAA = postprocessing.SMAA;
-} catch {
-  console.warn("[TetsuoAvatar3D] @react-three/postprocessing not installed. Run: npm install @react-three/postprocessing postprocessing");
-}
+const EffectComposer: React.ComponentType<{ children: React.ReactNode }> | null = null;
+const Bloom: React.ComponentType<Record<string, unknown>> | null = null;
+const Vignette: React.ComponentType<Record<string, unknown>> | null = null;
+const SMAA: React.ComponentType | null = null;
 import type { AgentAppearance, AgentStatus } from "../../types";
 import { useMouthAnimation } from "../../hooks/useMouthAnimation";
 import { useGenesisAnimation } from "../../hooks/useGenesisAnimation";
@@ -55,17 +44,10 @@ import { useIdleAnimation } from "../../hooks/useIdleAnimation";
 import { useTalkingAnimation } from "../../hooks/useTalkingAnimation";
 import { useCameraController } from "../../hooks/useCameraController";
 import { useAvatarStore } from "../../stores/avatarStore";
-import { DebugAPI } from "../../api";
 
-// Logger that outputs to both console and Tauri terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-  warn: (msg: string) => { console.warn(msg); DebugAPI.warn(msg); },
-};
+import { log } from "../../utils/log";
 
 const MODEL_PATH = "/models/agencfinalformr.glb";
-const DRACO_PATH = "/draco/";
 
 // ============================================================================
 // Configuration Constants (tweak these to adjust behavior)
@@ -176,10 +158,9 @@ interface MaterialRef {
 function applyAppearance(
   scene: THREE.Object3D,
   appearance: AgentAppearance,
-  materialRefs: Map<string, MaterialRef>
+  materialRefs: Map<string, MaterialRef>,
 ): void {
   const accentColor = new THREE.Color(appearance.accentColor);
-  const hairColor = new THREE.Color(appearance.hairColor);
   const eyeGlowColor = new THREE.Color(appearance.eyeGlowColor);
   const intensity = appearance.effectsIntensity;
 
@@ -198,6 +179,26 @@ function applyAppearance(
       // First time: clone material and store original values
       if (!ref) {
         const cloned = mat.clone();
+
+        // Preserve special material settings from scene setup
+        const meshMatName = `${child.name} ${mat.name || ''}`.toLowerCase();
+        const isEyeOverlay = /cornea|moisture|refract|tearline|occlusion/.test(meshMatName);
+        const isHairMat = /hair|strand|bangs|eyelash|nmixx/i.test(meshMatName);
+
+        if (isEyeOverlay || isHairMat) {
+          // Eye overlays and hair: preserve ALL original GLB settings
+        } else {
+          // Standard materials - force opaque
+          cloned.transparent = false;
+          cloned.opacity = 1;
+          cloned.depthWrite = true;
+          cloned.side = THREE.DoubleSide;
+          if ((cloned as THREE.MeshPhysicalMaterial).transmission !== undefined) {
+            (cloned as THREE.MeshPhysicalMaterial).transmission = 0;
+          }
+        }
+        cloned.needsUpdate = true;
+
         child.material = Array.isArray(child.material)
           ? child.material.map((m, i) => i === idx ? cloned : m)
           : cloned;
@@ -225,8 +226,7 @@ function applyAppearance(
           break;
 
         case 'hair':
-          // Blend original with hair color
-          material.color.copy(originalColor).lerp(hairColor, intensity * 0.7);
+          // Preserve GLB baked hair - no modifications
           break;
 
         case 'eye':
@@ -236,6 +236,7 @@ function applyAppearance(
           // Glossy eyes
           material.roughness = 0.1;
           material.metalness = 0;
+          // Preserve GLB eye textures - don't override map or color
           break;
 
         case 'mouth':
@@ -313,7 +314,7 @@ interface ReactiveModelProps {
 }
 
 function ReactiveModel({ appearance, status }: ReactiveModelProps) {
-  const gltf = useGLTF(MODEL_PATH, DRACO_PATH);
+  const gltf = useGLTF(MODEL_PATH);
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
@@ -343,10 +344,11 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     blinkIntervalMax: 5.0,
     blinkDuration: 0.15,
     headNodAmount: 0.015,
-    jawOpenAmount: 0,         // DISABLED - jaw handled by useMouthAnimation
-    enableBreathing: false,   // Handled by useIdleAnimation
-    enableBlinking: false,    // Handled by useIdleAnimation
-    enableHeadNod: false,     // Handled by useTalkingAnimation
+    jawOpenAmount: 0,              // DISABLED - jaw handled by useMouthAnimation
+    enableBreathing: false,        // Handled by useIdleAnimation
+    enableBlinking: false,         // Handled by useIdleAnimation
+    enableHeadNod: false,          // Handled by useTalkingAnimation
+    enableTPoseCorrection: false,  // Disabled pending arm bone diagnostics
   });
 
   // Facial expression system (smile, eyebrows, eye expressions)
@@ -379,7 +381,101 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // SkeletonUtils.clone properly rebinds skeleton bones to the cloned scene.
     // Standard clone(true) leaves SkinnedMesh referencing original bones.
     const clone = SkeletonUtils.clone(gltf.scene);
+
+    // Model faces +Z natively (confirmed by eye bone positions).
+    // No scene rotation needed — camera is at +Z looking toward origin.
     clone.updateMatrixWorld(true);
+
+    // Disable frustum culling for all meshes - required for SkinnedMesh
+    // because Three.js uses rest-pose bounding spheres that become
+    // inaccurate after bone animations (T-pose correction, etc.)
+    let meshCount = 0;
+    let skinnedMeshCount = 0;
+    const eyeMeshReport: string[] = [];
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.frustumCulled = false;
+        meshCount++;
+        if ((child as THREE.SkinnedMesh).isSkinnedMesh) skinnedMeshCount++;
+        const mesh = child as THREE.Mesh;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((m) => {
+          const stdMat = m as THREE.MeshStandardMaterial;
+          const physMat = m as THREE.MeshPhysicalMaterial;
+
+          // Log eye-related meshes for debugging
+          const nameCheck = `${child.name} ${m.name || ''}`.toLowerCase();
+          if (/eye|iris|pupil|cornea|sclera|moisture|refract|tearline|occlusion/.test(nameCheck)) {
+            const hasMap = stdMat.map ? 'has texture' : 'no texture';
+            const hasEmissiveMap = stdMat.emissiveMap ? 'has emissiveMap' : '';
+            eyeMeshReport.push(`  ${child.name} / ${m.name || 'unnamed'} [${hasMap}${hasEmissiveMap ? ', ' + hasEmissiveMap : ''}]`);
+          }
+
+          // Check if this is an eye overlay material (cornea, moisture, refraction, etc.)
+          // These layers sit ON TOP of the iris/pupil and must stay transparent,
+          // otherwise they become opaque white and hide the pupils.
+          const meshMatName = `${child.name} ${m.name || ''}`.toLowerCase();
+          const isEyeOverlay = /cornea|moisture|refract|tearline|occlusion/.test(meshMatName);
+
+          if (isEyeOverlay) {
+            // Make eye overlays fully transparent so iris/pupil are visible
+            stdMat.transparent = true;
+            stdMat.opacity = 0;
+            stdMat.depthWrite = false;
+            stdMat.needsUpdate = true;
+            return;
+          }
+
+          // Hair materials - preserve ALL original settings from the GLB.
+          // No color/alpha/transparency modifications.
+          const isHairMat = /hair|strand|bangs|eyelash|nmixx/i.test(meshMatName);
+          if (isHairMat) {
+            // Only ensure depthWrite so hair doesn't z-fight
+            stdMat.depthWrite = true;
+            stdMat.side = THREE.DoubleSide;
+            stdMat.needsUpdate = true;
+            return;
+          }
+
+          // Fix transparency - force opaque rendering
+          // The raw export has transparent=true + depthWrite=false on most materials,
+          // which causes them to be invisible due to render ordering issues
+          stdMat.transparent = false;
+          stdMat.opacity = 1;
+          stdMat.depthWrite = true;
+          stdMat.side = THREE.DoubleSide;
+
+          // Disable glass-like transmission
+          if (physMat.transmission !== undefined) {
+            physMat.transmission = 0;
+          }
+
+          stdMat.alphaTest = 0;
+
+          stdMat.needsUpdate = true;
+        });
+      }
+    });
+    log.info(`[TetsuoAvatar3D] Material fix applied to ${meshCount} meshes (${skinnedMeshCount} skinned)`);
+
+    // Diagnostic: log key bone world positions
+    const diagBones = ['head', 'l_eye', 'r_eye', 'l_shoulder', 'r_shoulder', 'l_upperarm', 'r_upperarm', 'l_forearm', 'r_forearm'];
+    clone.traverse((obj) => {
+      if (obj instanceof THREE.Bone && diagBones.includes(obj.name.toLowerCase())) {
+        obj.updateWorldMatrix(true, false);
+        const pos = new THREE.Vector3().setFromMatrixPosition(obj.matrixWorld);
+        log.info(`[TetsuoAvatar3D] Bone "${obj.name}" world pos: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
+      }
+    });
+
+    // Log eye mesh report so we can verify iris/pupil geometry exists
+    if (eyeMeshReport.length > 0) {
+      log.info(`[TetsuoAvatar3D] Eye-related meshes found (${eyeMeshReport.length}):`);
+      eyeMeshReport.forEach((line) => log.info(line));
+    } else {
+      log.warn('[TetsuoAvatar3D] NO eye-related meshes found in model - export may be missing eye geometry');
+    }
+
     return clone;
   }, [gltf.scene]);
 
@@ -558,11 +654,13 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // Facial expressions (smile, eyebrows, eye widening)
     expressionSystem.update(delta, isSpeaking);
 
-    // Idle animations (breathing, body sway, micro-movements, blinking)
-    idleAnimation.update(delta);
-
     // Talking animations (head nods, hand gestures, shoulder shrugs)
+    // Runs BEFORE idle so idle has final say on shared bones (head, shoulders)
     talkingAnimation.update(delta, isSpeaking);
+
+    // Idle animations (breathing, body sway, micro-movements, blinking)
+    // Runs LAST to ensure breathing/sway are always visible
+    idleAnimation.update(delta);
 
     // Force eye bones to look forward every frame
     if (!eyeBonesSearched.current) {
@@ -625,10 +723,10 @@ export default function TetsuoAvatar3D({
     <div style={{ width: 420, height: 520 }}>
       <Canvas
         camera={{
-          position: initialPreset.position,
+          position: initialPreset.position as [number, number, number],
           fov: initialPreset.fov,
-          near: 1,
-          far: 1000,
+          near: 0.1,
+          far: 2000,
         }}
         onError={() => onLoadError?.()}
         frameloop="always"
@@ -695,14 +793,14 @@ export default function TetsuoAvatar3D({
           </EffectComposer>
         )}
 
-        {/* Orbit controls - enabled only in orbit mode */}
+        {/* Orbit controls - disabled during camera transitions */}
         <OrbitControls
-          enablePan={orbitEnabled}
-          enableZoom={orbitEnabled}
-          enableRotate={orbitEnabled}
-          target={initialPreset.target}
-          enabled={orbitEnabled && !isTransitioning}
-          minDistance={30}
+          enablePan={false}
+          enableZoom={true}
+          enableRotate={!isTransitioning}
+          target={initialPreset.target as unknown as THREE.Vector3}
+          enabled={!isTransitioning}
+          minDistance={20}
           maxDistance={500}
           minPolarAngle={Math.PI * 0.1}
           maxPolarAngle={Math.PI * 0.9}
@@ -718,8 +816,8 @@ export default function TetsuoAvatar3D({
 
 export function preloadModel() {
   try {
-    log.info("[TetsuoAvatar3D] Preloading model with Draco: " + MODEL_PATH);
-    useGLTF.preload(MODEL_PATH, DRACO_PATH);
+    log.info("[TetsuoAvatar3D] Preloading model: " + MODEL_PATH);
+    useGLTF.preload(MODEL_PATH);
   } catch (e) {
     log.warn("[TetsuoAvatar3D] Failed to preload model: " + e);
   }

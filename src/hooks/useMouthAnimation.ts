@@ -4,6 +4,14 @@
  * ============================================================================
  * Provides a mouthOpen value (0..1) driven by audio playback.
  * Also provides appliers for morph targets and jaw bones.
+ *
+ * Integrates with the animation system:
+ *   - useIdleAnimation (breathing, blinks)
+ *   - useTalkingAnimation (gestures, head movement)
+ *   - useExpressionSystem (facial expressions)
+ *
+ * This hook handles the core lip sync mechanism while the expression system
+ * handles higher-level facial animation.
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react';
@@ -16,18 +24,12 @@ import {
 import {
   inspectGLB,
   logGLBInspection,
+  isExcludedMorph,
   type GLBInspectionResult,
   type MorphTargetInfo,
   type BoneInfo,
 } from '../utils/glbInspector';
-import { DebugAPI } from '../api';
-
-// Helper to log to terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-  warn: (msg: string) => { console.warn(msg); DebugAPI.log('warn', msg); },
-};
+import { log } from '../utils/log';
 
 // ============================================================================
 // Configuration
@@ -44,6 +46,10 @@ export interface MouthAnimationConfig {
   debug: boolean;
   /** Force mouth open to this value (0-1) for testing. Set to -1 to disable. */
   forceTest: number;
+  /** Use jaw bone in addition to morph targets */
+  useJawBone: boolean;
+  /** Jaw bone contribution when using morph targets (0-1) */
+  jawBoneContribution: number;
 }
 
 const DEFAULT_CONFIG: MouthAnimationConfig = {
@@ -52,6 +58,8 @@ const DEFAULT_CONFIG: MouthAnimationConfig = {
   jawRotationDirection: 1,
   debug: false,
   forceTest: -1, // Set to 0.9 to test if rig works
+  useJawBone: true, // Use jaw bone for additional realism
+  jawBoneContribution: 0.3, // 30% jaw bone when morph targets available
 };
 
 // ============================================================================
@@ -131,22 +139,45 @@ export function useMouthAnimation(
     }
 
     // Determine animation method
-    if (inspection.bestMouthMorph) {
-      // Use morph targets
+    // Check if morph target is valid (not an asymmetry/proportion sculpting morph)
+    const hasValidMorph = inspection.bestMouthMorph &&
+      !isExcludedMorph(inspection.bestMouthMorph.targetName);
+
+    if (hasValidMorph && inspection.bestMouthMorph) {
+      // Use morph targets as primary (only if it's a real animation morph)
       useMorphTargetsRef.current = true;
       morphTargetRef.current = inspection.bestMouthMorph;
       log.info(
         `[MouthAnimation] Using morph target: "${inspection.bestMouthMorph.targetName}" on "${inspection.bestMouthMorph.meshName}"`
       );
+
+      // Also store jaw bone for hybrid animation if available
+      if (inspection.bestJawBone && cfg.useJawBone) {
+        jawBoneRef.current = inspection.bestJawBone;
+        jawRestRotationRef.current = inspection.bestJawBone.bone.rotation.clone();
+        log.info(`[MouthAnimation] Also using jaw bone for hybrid animation: "${inspection.bestJawBone.name}"`);
+      }
     } else if (inspection.bestJawBone) {
-      // Fall back to jaw bone
+      // Use jaw bone as PRIMARY (no valid morph targets available)
+      // This handles models like Victoria 9 HD that only have sculpting morphs
       useMorphTargetsRef.current = false;
       jawBoneRef.current = inspection.bestJawBone;
       // Store rest rotation
       jawRestRotationRef.current = inspection.bestJawBone.bone.rotation.clone();
-      log.info(`[MouthAnimation] Using jaw bone: "${inspection.bestJawBone.name}"`);
+
+      if (inspection.bestMouthMorph && isExcludedMorph(inspection.bestMouthMorph.targetName)) {
+        log.warn(`[MouthAnimation] Skipping excluded morph: "${inspection.bestMouthMorph.targetName}" (asymmetry/proportion morph, not animation)`);
+      }
+
+      log.info(`[MouthAnimation] Using jaw bone only: "${inspection.bestJawBone.name}"`);
+      log.info(`[MouthAnimation] Jaw bone rest rotation: x=${jawRestRotationRef.current.x.toFixed(4)}, y=${jawRestRotationRef.current.y.toFixed(4)}, z=${jawRestRotationRef.current.z.toFixed(4)}`);
     } else {
       log.warn('[MouthAnimation] No suitable morph targets or jaw bones found');
+      // List all bones found for debugging
+      if (inspection.bones.length > 0) {
+        const boneNames = inspection.bones.map(b => b.name).join(', ');
+        log.warn(`[MouthAnimation] Available bones: ${boneNames.slice(0, 200)}...`);
+      }
     }
 
     // Ensure driver is initialized
@@ -195,32 +226,43 @@ export function useMouthAnimation(
       debugCounterRef.current = 0;
       const hasMorph = useMorphTargetsRef.current && morphTargetRef.current;
       const hasJaw = jawBoneRef.current && jawRestRotationRef.current;
-      log.debug(`[MouthAnimation] mouthOpen=${mouthOpen.toFixed(3)} hasMorph=${hasMorph} hasJaw=${hasJaw}`);
+      const jawRotation = jawBoneRef.current?.bone?.rotation;
+      log.debug(`[MouthAnimation] mouthOpen=${mouthOpen.toFixed(3)} hasMorph=${hasMorph} hasJaw=${hasJaw} jawX=${jawRotation?.x?.toFixed(4) ?? 'N/A'}`);
     }
 
+    // Apply to morph target if available
     if (useMorphTargetsRef.current && morphTargetRef.current) {
-      // Apply to morph target
       const { mesh, index } = morphTargetRef.current;
       if (mesh.morphTargetInfluences) {
         mesh.morphTargetInfluences[index] = mouthOpen;
       }
-    } else if (jawBoneRef.current && jawRestRotationRef.current) {
-      // Apply to jaw bone
+    }
+
+    // Apply to jaw bone (either as primary or secondary animation)
+    if (jawBoneRef.current && jawRestRotationRef.current) {
       const bone = jawBoneRef.current.bone;
       const restRotation = jawRestRotationRef.current;
-      const rotation = mouthOpen * cfg.maxJawRotation * cfg.jawRotationDirection;
 
-      // Apply rotation on the configured axis
-      switch (cfg.jawRotationAxis) {
-        case 'x':
-          bone.rotation.x = restRotation.x + rotation;
-          break;
-        case 'y':
-          bone.rotation.y = restRotation.y + rotation;
-          break;
-        case 'z':
-          bone.rotation.z = restRotation.z + rotation;
-          break;
+      // Calculate jaw contribution based on whether morph targets are being used
+      const jawContribution = useMorphTargetsRef.current
+        ? (cfg.useJawBone ? cfg.jawBoneContribution : 0)
+        : 1.0;
+
+      if (jawContribution > 0) {
+        const rotation = mouthOpen * cfg.maxJawRotation * cfg.jawRotationDirection * jawContribution;
+
+        // Apply rotation on the configured axis
+        switch (cfg.jawRotationAxis) {
+          case 'x':
+            bone.rotation.x = restRotation.x + rotation;
+            break;
+          case 'y':
+            bone.rotation.y = restRotation.y + rotation;
+            break;
+          case 'z':
+            bone.rotation.z = restRotation.z + rotation;
+            break;
+        }
       }
     }
   }, []);

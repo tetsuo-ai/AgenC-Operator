@@ -15,14 +15,7 @@
 import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { stripMorphPrefix } from '../utils/glbInspector';
-import { DebugAPI } from '../api';
-
-// Logger that outputs to both console and Tauri terminal
-const log = {
-  debug: (msg: string) => { console.log(msg); DebugAPI.debug(msg); },
-  info: (msg: string) => { console.log(msg); DebugAPI.info(msg); },
-  warn: (msg: string) => { console.warn(msg); DebugAPI.warn(msg); },
-};
+import { log } from '../utils/log';
 
 // ============================================================================
 // Configuration
