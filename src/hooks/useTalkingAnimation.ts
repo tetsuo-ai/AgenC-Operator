@@ -22,6 +22,7 @@
 import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { log } from '../utils/log';
+import { MODEL_CONFIG } from '../config/modelConfig';
 
 // ============================================================================
 // Configuration
@@ -108,19 +109,21 @@ interface RestPoses {
 }
 
 // ============================================================================
-// Genesis 9 Bone Name Patterns
+// Bone Patterns (sourced from shared modelConfig)
 // ============================================================================
 
+const sk = MODEL_CONFIG.skeleton;
 const BONE_PATTERNS: Record<keyof TalkingBoneRefs, RegExp[]> = {
-  head: [/^head$/i],
+  head: sk.head,
+  // Neck segments: explicit since modelConfig.neck is a flat array
   neck1: [/^neck1$/i, /^neck$/i],
   neck2: [/^neck2$/i, /^neckUpper$/i],
-  shoulderL: [/^l_shoulder$/i, /^lCollar$/i, /^shoulder[_]?l$/i],
-  shoulderR: [/^r_shoulder$/i, /^rCollar$/i, /^shoulder[_]?r$/i],
-  upperArmL: [/^l_upperarm$/i, /^lShldrBend$/i, /^upperarm[_]?l$/i],
-  upperArmR: [/^r_upperarm$/i, /^rShldrBend$/i, /^upperarm[_]?r$/i],
-  foreArmL: [/^l_forearm$/i, /^lForearmBend$/i, /^forearm[_]?l$/i],
-  foreArmR: [/^r_forearm$/i, /^rForearmBend$/i, /^forearm[_]?r$/i],
+  shoulderL: sk.shoulders.left,
+  shoulderR: sk.shoulders.right,
+  upperArmL: sk.upperArms.left,
+  upperArmR: sk.upperArms.right,
+  foreArmL: sk.forearms.left,
+  foreArmR: sk.forearms.right,
   handL: [/^l_hand$/i, /^lHand$/i, /^hand[_]?l$/i],
   handR: [/^r_hand$/i, /^rHand$/i, /^hand[_]?r$/i],
   spine: [/^spine1$/i, /^spine$/i],

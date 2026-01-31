@@ -35,8 +35,29 @@ export interface SkeletonConfig {
   shoulders: { left: RegExp[]; right: RegExp[] };
   /** Upper arm bones */
   upperArms: { left: RegExp[]; right: RegExp[] };
+  /** Forearm bones */
+  forearms: { left: RegExp[]; right: RegExp[] };
   /** Hip/pelvis bone */
   hips: RegExp[];
+  /** Facial expression bones */
+  face: {
+    browInnerL: RegExp[];
+    browInnerR: RegExp[];
+    browOuterL: RegExp[];
+    browOuterR: RegExp[];
+    lipCornerL: RegExp[];
+    lipCornerR: RegExp[];
+    lipUpperCenter: RegExp[];
+    lipLowerCenter: RegExp[];
+    lipUpperL: RegExp[];
+    lipUpperR: RegExp[];
+    lipLowerL: RegExp[];
+    lipLowerR: RegExp[];
+    cheekL: RegExp[];
+    cheekR: RegExp[];
+    nostrilL: RegExp[];
+    nostrilR: RegExp[];
+  };
 }
 
 export interface MorphTargetConfig {
@@ -137,6 +158,9 @@ export const GENESIS9_CONFIG: ModelConfig = {
     neck: [
       /^neck1$/i,
       /^neck2$/i,
+      /^neck$/i,
+      /^neckLower$/i,
+      /^neckUpper$/i,
     ],
 
     eyes: {
@@ -145,26 +169,51 @@ export const GENESIS9_CONFIG: ModelConfig = {
     },
 
     eyelids: {
-      upperL: [/^l_eyelidupper$/i],
-      upperR: [/^r_eyelidupper$/i],
-      lowerL: [/^l_eyelidlower$/i],
-      lowerR: [/^r_eyelidlower$/i],
+      upperL: [/^l_eyelidupper$/i, /^Eyelid[_]?Top[_]?l$/i, /^eyelidTopL$/i, /^lEyelidUpper$/i],
+      upperR: [/^r_eyelidupper$/i, /^Eyelid[_]?Top[_]?r$/i, /^eyelidTopR$/i, /^rEyelidUpper$/i],
+      lowerL: [/^l_eyelidlower$/i, /^Eyelid[_]?Bot[_]?l$/i, /^eyelidBotL$/i, /^lEyelidLower$/i],
+      lowerR: [/^r_eyelidlower$/i, /^Eyelid[_]?Bot[_]?r$/i, /^eyelidBotR$/i, /^rEyelidLower$/i],
     },
 
     shoulders: {
-      left: [/^l_shoulder$/i],
-      right: [/^r_shoulder$/i],
+      left: [/^l_shoulder$/i, /^lCollar$/i, /^shoulder[_]?l$/i],
+      right: [/^r_shoulder$/i, /^rCollar$/i, /^shoulder[_]?r$/i],
     },
 
     upperArms: {
-      left: [/^l_upperarm$/i],
-      right: [/^r_upperarm$/i],
+      left: [/^l_upperarm$/i, /^lShldrBend$/i, /^upperarm[_]?l$/i],
+      right: [/^r_upperarm$/i, /^rShldrBend$/i, /^upperarm[_]?r$/i],
+    },
+
+    forearms: {
+      left: [/^l_forearm$/i, /^lForearmBend$/i, /^forearm[_]?l$/i],
+      right: [/^r_forearm$/i, /^rForearmBend$/i, /^forearm[_]?r$/i],
     },
 
     hips: [
       /^pelvis$/i,
       /^hip$/i,
+      /^hips$/i,
     ],
+
+    face: {
+      browInnerL: [/^l_browinner$/i, /^browInnerL$/i, /^l_brow_inner$/i],
+      browInnerR: [/^r_browinner$/i, /^browInnerR$/i, /^r_brow_inner$/i],
+      browOuterL: [/^l_browouter$/i, /^browOuterL$/i, /^l_brow_outer$/i],
+      browOuterR: [/^r_browouter$/i, /^browOuterR$/i, /^r_brow_outer$/i],
+      lipCornerL: [/^l_lipcorner$/i, /^lipCornerL$/i],
+      lipCornerR: [/^r_lipcorner$/i, /^lipCornerR$/i],
+      lipUpperCenter: [/^center_lipupper$/i, /^centerlipupper$/i, /^mid_lipupper$/i],
+      lipLowerCenter: [/^center_liplower$/i, /^centerliplower$/i, /^mid_liplower$/i],
+      lipUpperL: [/^l_lipupper$/i, /^lipUpperL$/i],
+      lipUpperR: [/^r_lipupper$/i, /^lipUpperR$/i],
+      lipLowerL: [/^l_liplower$/i, /^lipLowerL$/i],
+      lipLowerR: [/^r_liplower$/i, /^lipLowerR$/i],
+      cheekL: [/^l_cheek$/i, /^l_cheekupper$/i, /^cheekL$/i],
+      cheekR: [/^r_cheek$/i, /^r_cheekupper$/i, /^cheekR$/i],
+      nostrilL: [/^l_nostril$/i, /^nostrilL$/i],
+      nostrilR: [/^r_nostril$/i, /^nostrilR$/i],
+    },
   },
 
   morphTargets: {
@@ -262,7 +311,7 @@ export const GENESIS9_CONFIG: ModelConfig = {
     ],
 
     eyes: [
-      /eye/i,
+      /eye(?!lid|lash|brow)/i,  // "eye" but NOT "eyelid", "eyelash", "eyebrow"
       /iris/i,
       /pupil/i,
       /cornea/i,

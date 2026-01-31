@@ -20,6 +20,8 @@ import TitleBar from './components/TitleBar';
 import VoiceButton from './components/VoiceButton';
 import StatusBar from './components/StatusBar';
 import WalletDropdown from './components/WalletDropdown';
+import HudPanel from './components/HudPanel';
+import TaskMarketplace from './components/TaskMarketplace';
 
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
@@ -63,6 +65,10 @@ function App() {
     isCustomizeOpen,
     setIsCustomizeOpen,
     toggleCustomize,
+    isHudOpen,
+    toggleHud,
+    isMarketplaceOpen,
+    toggleMarketplace,
   } = useAppStore();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -222,11 +228,23 @@ function App() {
         e.preventDefault();
         toggleCustomize();
       }
+
+      // H toggles the HUD panel
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        toggleHud();
+      }
+
+      // M toggles the Task Marketplace
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        toggleMarketplace();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleCustomize]);
+  }, [toggleCustomize, toggleHud, toggleMarketplace]);
 
   // ============================================================================
   // Initialization (Non-Blocking)
@@ -350,6 +368,35 @@ function App() {
         {/* Wallet Dropdown */}
         <WalletDropdown wallet={wallet} />
       </div>
+
+      {/* HUD Panel Overlay (toggle with H) */}
+      {isHudOpen && (
+        <div className="absolute top-12 left-4 z-40 w-80">
+          <HudPanel
+            title="SYSTEM STATUS"
+            color="cyan"
+            protocolState={protocolState}
+            wallet={wallet}
+          />
+        </div>
+      )}
+
+      {/* Task Marketplace Overlay (toggle with M) */}
+      {isMarketplaceOpen && (
+        <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-40 max-h-[80vh] overflow-y-auto">
+          <TaskMarketplace
+            wallet={wallet}
+            onTaskAction={(action, taskId) => {
+              addMessage({
+                id: `task-${Date.now()}`,
+                role: 'system',
+                content: `Task ${action}: ${taskId.slice(0, 8)}...`,
+                timestamp: Date.now(),
+              });
+            }}
+          />
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative">

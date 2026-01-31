@@ -24,3 +24,4 @@ export { default as ChatPanel } from './ChatPanel';
 export { default as TitleBar } from './TitleBar';
 export { default as VoiceButton } from './VoiceButton';
 export { default as StatusBar } from './StatusBar';
+export { default as TaskMarketplace } from './TaskMarketplace';

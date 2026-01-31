@@ -19,6 +19,7 @@
 import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { log } from '../utils/log';
+import { MODEL_CONFIG } from '../config/modelConfig';
 
 // ============================================================================
 // Configuration
@@ -190,32 +191,33 @@ export interface UseExpressionSystemReturn {
 // Bone Name Patterns (Genesis 9)
 // ============================================================================
 
+const face = MODEL_CONFIG.skeleton.face;
 const FACE_BONE_PATTERNS: Record<keyof ExpressionBoneRefs, RegExp[]> = {
   // Brow bones
-  browInnerL: [/^l_browinner$/i, /^browInnerL$/i, /^l_brow_inner$/i],
-  browInnerR: [/^r_browinner$/i, /^browInnerR$/i, /^r_brow_inner$/i],
-  browOuterL: [/^l_browouter$/i, /^browOuterL$/i, /^l_brow_outer$/i],
-  browOuterR: [/^r_browouter$/i, /^browOuterR$/i, /^r_brow_outer$/i],
+  browInnerL: face.browInnerL,
+  browInnerR: face.browInnerR,
+  browOuterL: face.browOuterL,
+  browOuterR: face.browOuterR,
   // Lip corners
-  lipCornerL: [/^l_lipcorner$/i, /^lipCornerL$/i],
-  lipCornerR: [/^r_lipcorner$/i, /^lipCornerR$/i],
+  lipCornerL: face.lipCornerL,
+  lipCornerR: face.lipCornerR,
   // Cheeks
-  cheekL: [/^l_cheek$/i, /^l_cheekupper$/i, /^cheekL$/i],
-  cheekR: [/^r_cheek$/i, /^r_cheekupper$/i, /^cheekR$/i],
+  cheekL: face.cheekL,
+  cheekR: face.cheekR,
   // Nostrils
-  nostrilL: [/^l_nostril$/i, /^nostrilL$/i],
-  nostrilR: [/^r_nostril$/i, /^nostrilR$/i],
+  nostrilL: face.nostrilL,
+  nostrilR: face.nostrilR,
   // Center lips
-  lipUpperCenter: [/^center_lipupper$/i, /^centerlipupper$/i, /^mid_lipupper$/i],
-  lipLowerCenter: [/^center_liplower$/i, /^centerliplower$/i, /^mid_liplower$/i],
+  lipUpperCenter: face.lipUpperCenter,
+  lipLowerCenter: face.lipLowerCenter,
   // Eyes
-  eyeL: [/^l_eye$/i],
-  eyeR: [/^r_eye$/i],
+  eyeL: MODEL_CONFIG.skeleton.eyes.left,
+  eyeR: MODEL_CONFIG.skeleton.eyes.right,
   // Eyelids (for widen/squint)
-  eyelidUpperL: [/^l_eyelidupper$/i],
-  eyelidUpperR: [/^r_eyelidupper$/i],
-  eyelidLowerL: [/^l_eyelidlower$/i],
-  eyelidLowerR: [/^r_eyelidlower$/i],
+  eyelidUpperL: MODEL_CONFIG.skeleton.eyelids.upperL,
+  eyelidUpperR: MODEL_CONFIG.skeleton.eyelids.upperR,
+  eyelidLowerL: MODEL_CONFIG.skeleton.eyelids.lowerL,
+  eyelidLowerR: MODEL_CONFIG.skeleton.eyelids.lowerR,
 };
 
 // Morph target patterns (used if available)

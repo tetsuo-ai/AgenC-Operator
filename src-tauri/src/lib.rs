@@ -1527,22 +1527,22 @@ async fn get_voice_token() -> Result<AsyncResult<String>, String> {
     match response {
         Ok(resp) => {
             if resp.status().is_success() {
-                // Get raw response for debugging
                 let body = resp.text().await.unwrap_or_default();
-                debug!("[IPC] Token response body: {}", body);
+                // SECURITY: Don't log the raw body — it contains the ephemeral token
+                debug!("[IPC] Token response received ({} bytes)", body.len());
 
                 match serde_json::from_str::<ClientSecretResponse>(&body) {
                     Ok(data) => {
                         if let Some((token, expires_at)) = data.get_token() {
-                            info!("[IPC] Got ephemeral token, expires at {}", expires_at);
+                            info!("[IPC] Got ephemeral token ({} chars), expires at {}", token.len(), expires_at);
                             Ok(AsyncResult::ok(token))
                         } else {
-                            error!("[IPC] Token response missing value field: {}", body);
+                            error!("[IPC] Token response missing value field (response had {} bytes)", body.len());
                             Ok(AsyncResult::err("Token response missing value field"))
                         }
                     }
                     Err(e) => {
-                        error!("[IPC] Failed to parse token response: {} - body: {}", e, body);
+                        error!("[IPC] Failed to parse token response: {} ({} bytes)", e, body.len());
                         Ok(AsyncResult::err(format!("Failed to parse token: {}", e)))
                     }
                 }
