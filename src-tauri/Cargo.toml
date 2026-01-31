@@ -21,6 +21,7 @@ solana-sdk = { workspace = true }
 # Tauri v2
 tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-shell = "2"
+tauri-plugin-updater = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
