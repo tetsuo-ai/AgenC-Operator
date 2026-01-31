@@ -38,9 +38,13 @@ import { useExpressionSystem } from "../../hooks/useExpressionSystem";
 import { useIdleAnimation } from "../../hooks/useIdleAnimation";
 import { useTalkingAnimation } from "../../hooks/useTalkingAnimation";
 import { useCameraController } from "../../hooks/useCameraController";
+import { useVisemeDriver } from "../../hooks/useVisemeDriver";
+import { useGazeTracking } from "../../hooks/useGazeTracking";
+import { useWiggleBones } from "../../hooks/useWiggleBones";
 import { useAvatarStore } from "../../stores/avatarStore";
 import { log } from "../../utils/log";
 import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
+import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
 
 const MODEL_PATH = MODEL_CONFIG.path;
 
@@ -332,6 +336,15 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   // Talking animation system (head nods, hand gestures, shoulder shrugs)
   const talkingAnimation = useTalkingAnimation();
 
+  // Viseme driver for phoneme-based lip sync
+  const visemeDriver = useVisemeDriver();
+
+  // Gaze tracking system (head/eye cursor following)
+  const gazeTracking = useGazeTracking();
+
+  // Wiggle bones for hair/accessory physics (spring-based secondary motion)
+  const wiggleBones = useWiggleBones({ velocity: 0.12, enabled: true });
+
   // ========================================
   // Scene Setup
   // ========================================
@@ -554,6 +567,14 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       log.info("[TetsuoAvatar3D] Initializing TalkingAnimation...");
       talkingAnimation.initialize(clonedScene);
 
+      // Initialize gaze tracking (head/eye cursor following)
+      log.info("[TetsuoAvatar3D] Initializing GazeTracking...");
+      gazeTracking.initialize(clonedScene);
+
+      // Initialize wiggle bones for hair/accessory physics (async - loads wiggle lib)
+      log.info("[TetsuoAvatar3D] Initializing WiggleBones...");
+      wiggleBones.initialize(clonedScene);
+
       animationsInitializedRef.current = true;
 
       // Expose rig API for external control (console, demos)
@@ -591,6 +612,59 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
           expressionSystem.triggerExpression('emphasis', 0.5);
         },
 
+        // Viseme testing
+        testViseme: (visemeId: string) => {
+          const shape = VISEME_SHAPES[visemeId as VisemeId];
+          if (shape) {
+            log.info(`[RigAPI] Testing viseme: ${visemeId}`);
+            mouthAnimation.setVisemeTarget(shape);
+            // Clear after 1 second
+            setTimeout(() => mouthAnimation.setVisemeTarget(null), 1000);
+          } else {
+            const validIds = Object.keys(VISEME_SHAPES).join(', ');
+            console.log(`Unknown viseme "${visemeId}". Valid: ${validIds}`);
+          }
+        },
+
+        // Get viseme driver reference for external control
+        visemeDriver,
+
+        // Gaze tracking controls
+        setGazeMode: (mode: 'user' | 'camera' | 'wander') => {
+          log.info(`[RigAPI] Gaze mode → ${mode}`);
+          gazeTracking.setMode(mode);
+        },
+        getGazeMode: () => gazeTracking.getMode(),
+
+        // Emotion controls
+        setEmotion: (emotion: string, intensity?: number) => {
+          log.info(`[RigAPI] Emotion → ${emotion} (${intensity ?? 1.0})`);
+          expressionSystem.setEmotion(emotion as Parameters<typeof expressionSystem.setEmotion>[0], intensity);
+        },
+
+        // Gesture controls
+        testGesture: (type: string) => {
+          log.info(`[RigAPI] Testing gesture: ${type}`);
+          talkingAnimation.triggerGesture(type as Parameters<typeof talkingAnimation.triggerGesture>[0]);
+        },
+        listGestures: () => {
+          const types = talkingAnimation.getGestureTypes();
+          console.log(`Available gestures: ${types.join(', ')}`);
+          return types;
+        },
+        setGestureAmplitude: (scale: number) => {
+          talkingAnimation.setAmplitudeScale(scale);
+          log.info(`[RigAPI] Gesture amplitude scale → ${scale}`);
+        },
+
+        // Wiggle bones controls
+        toggleWiggle: () => {
+          const newState = !wiggleBones.isEnabled();
+          wiggleBones.setEnabled(newState);
+          log.info(`[RigAPI] Wiggle ${newState ? 'enabled' : 'disabled'}`);
+        },
+        getWiggleBoneCount: () => wiggleBones.getBoneCount(),
+
         // Help
         help: () => {
           console.log(`
@@ -604,6 +678,18 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
 ║  rig.triggerSmile()      - Trigger a smile (2s)        ║
 ║  rig.triggerThinking()   - Trigger thinking face (1.5s)║
 ║  rig.triggerEmphasis()   - Trigger emphasis (0.5s)     ║
+║  rig.testViseme(id)      - Test a viseme shape         ║
+║    IDs: sil PP FF TH DD kk CH SS nn RR aa E ih oh ou  ║
+║  rig.setGazeMode(mode)   - 'user'|'camera'|'wander'   ║
+║  rig.getGazeMode()       - Get current gaze mode       ║
+║  rig.setEmotion(e, i)    - Set emotion with intensity  ║
+║    Emotions: neutral happy sad angry surprised          ║
+║              thinking listening concerned               ║
+║  rig.testGesture(type)   - Trigger a body gesture      ║
+║    Types: beat open point tilt shrug                    ║
+║  rig.listGestures()      - List available gestures     ║
+║  rig.setGestureAmplitude(s) - Scale gesture size (1.0) ║
+║  rig.toggleWiggle()      - Toggle hair physics on/off  ║
 ║  rig.help()              - Show this help              ║
 ╚════════════════════════════════════════════════════════╝
           `);
@@ -614,7 +700,7 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       (window as unknown as { rig: typeof rigAPI }).rig = rigAPI;
       log.info("[TetsuoAvatar3D] Rig API exposed to window.rig - try rig.help() in console");
     }
-  }, [clonedScene, mouthAnimation, genesisAnimation, expressionSystem, idleAnimation, talkingAnimation]);
+  }, [clonedScene, mouthAnimation, genesisAnimation, expressionSystem, idleAnimation, talkingAnimation, visemeDriver, gazeTracking, wiggleBones]);
 
   // Apply appearance whenever it changes
   useEffect(() => {
@@ -650,6 +736,24 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   }, [clonedScene]);
 
   // ========================================
+  // Cursor Tracking for Gaze
+  // ========================================
+
+  const { gl } = useThree();
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const handlePointerMove = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      // Normalize to -1..1 (left/bottom = -1, right/top = 1)
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -(((e.clientY - rect.top) / rect.height) * 2 - 1); // Invert Y
+      gazeTracking.setCursorPosition(x, y);
+    };
+    canvas.addEventListener('pointermove', handlePointerMove);
+    return () => canvas.removeEventListener('pointermove', handlePointerMove);
+  }, [gl, gazeTracking]);
+
+  // ========================================
   // Animation Loop
   // ========================================
 
@@ -680,10 +784,17 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       timeRef.current
     );
 
+    // Update viseme driver timeline (advances phoneme playback)
+    visemeDriver.update(delta);
+
+    // Feed current viseme shape to mouth animation (or null for amplitude-only mode)
+    const visemeState = visemeDriver.getState();
+    mouthAnimation.setVisemeTarget(visemeState.currentViseme);
+
     // Get mouth open value from MouthDriver (audio amplitude)
     const mouthOpen = mouthAnimation.getState?.().mouthOpen ?? 0;
 
-    // Apply morph target mouth animation (lip shapes)
+    // Apply morph target mouth animation (lip shapes + viseme)
     mouthAnimation.applyMouthAnimation();
 
     // Genesis animation system (T-pose correction applied at init)
@@ -692,13 +803,25 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // Facial expressions (smile, eyebrows, eye widening, speech-reactive brows)
     expressionSystem.update(delta, isSpeaking, mouthOpen);
 
+    // Gaze tracking (head/eye cursor following)
+    // Runs AFTER expressions so gaze has authority over eye bone rotations
+    gazeTracking.update(delta);
+
+    // Feed audio amplitude to talking animation for amplitude-driven gestures
+    talkingAnimation.setMouthOpen(mouthOpen);
+
     // Talking animations (head nods, hand gestures, shoulder shrugs)
-    // Runs BEFORE idle so idle has final say on shared bones (head, shoulders)
+    // Now has authority over head/shoulders (idle yields during speech)
     talkingAnimation.update(delta, isSpeaking);
 
     // Idle animations (breathing, body sway, micro-movements, blinking)
-    // Runs LAST to ensure breathing/sway are always visible
-    idleAnimation.update(delta);
+    // Runs LAST of the primary animation systems
+    // isSpeaking yields head/shoulder authority to talking animation
+    idleAnimation.update(delta, isSpeaking);
+
+    // Wiggle bones physics (hair/accessory spring simulation)
+    // Must run AFTER all other bone animations so physics reacts to final transforms
+    wiggleBones.update(delta);
 
     // Force skeleton recalculation after all bone modifications
     clonedScene.traverse((obj) => {

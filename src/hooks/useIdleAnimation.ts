@@ -135,8 +135,8 @@ interface IdleAnimationState {
 export interface UseIdleAnimationReturn {
   /** Initialize with loaded scene */
   initialize: (scene: THREE.Object3D) => void;
-  /** Update animations (call in useFrame) */
-  update: (delta: number) => void;
+  /** Update animations (call in useFrame). Pass isSpeaking to yield head/shoulder authority to talking animation. */
+  update: (delta: number, isSpeaking?: boolean) => void;
   /** Get current blink value (0-1) for external use */
   getBlinkValue: () => number;
   /** Reset animation state */
@@ -365,7 +365,7 @@ export function useIdleAnimation(
   // Update (call every frame)
   // ============================================================================
 
-  const update = useCallback((delta: number) => {
+  const update = useCallback((delta: number, isSpeaking?: boolean) => {
     if (!initializedRef.current) return;
 
     const config = configRef.current;
@@ -390,11 +390,14 @@ export function useIdleAnimation(
       bones.chest.rotation.x = rest.chest.x - breathIn * config.breathChestAmount;
     }
 
-    if (bones.shoulderL && rest.shoulderL) {
-      bones.shoulderL.rotation.z = rest.shoulderL.z + breathIn * config.breathShoulderAmount;
-    }
-    if (bones.shoulderR && rest.shoulderR) {
-      bones.shoulderR.rotation.z = rest.shoulderR.z - breathIn * config.breathShoulderAmount;
+    // Shoulder breathing yields to talking animation during speech
+    if (!isSpeaking) {
+      if (bones.shoulderL && rest.shoulderL) {
+        bones.shoulderL.rotation.z = rest.shoulderL.z + breathIn * config.breathShoulderAmount;
+      }
+      if (bones.shoulderR && rest.shoulderR) {
+        bones.shoulderR.rotation.z = rest.shoulderR.z - breathIn * config.breathShoulderAmount;
+      }
     }
 
     // ========================================
@@ -412,30 +415,31 @@ export function useIdleAnimation(
       bones.spine.rotation.z = rest.spine.z + swayZ;
     }
 
-    if (bones.head && rest.head) {
-      // Head counter-sway (looks more natural)
-      bones.head.rotation.x = rest.head.x - swayX * config.swayHeadAmount * 3;
-      bones.head.rotation.z = rest.head.z - swayZ * config.swayHeadAmount * 2;
-    }
+    // Head sway and micro-movements yield to talking animation during speech
+    if (!isSpeaking) {
+      if (bones.head && rest.head) {
+        // Head counter-sway (looks more natural)
+        bones.head.rotation.x = rest.head.x - swayX * config.swayHeadAmount * 3;
+        bones.head.rotation.z = rest.head.z - swayZ * config.swayHeadAmount * 2;
+      }
 
-    // ========================================
-    // Micro-Movements (random tiny variations)
-    // ========================================
-    if (t - state.lastMicroUpdate > 1 / config.microSpeed) {
-      state.microNoise.set(
-        (Math.random() - 0.5) * 2 * config.microAmount,
-        (Math.random() - 0.5) * 2 * config.microAmount,
-        (Math.random() - 0.5) * 2 * config.microAmount
-      );
-      state.lastMicroUpdate = t;
-    }
+      // Micro-Movements (random tiny variations)
+      if (t - state.lastMicroUpdate > 1 / config.microSpeed) {
+        state.microNoise.set(
+          (Math.random() - 0.5) * 2 * config.microAmount,
+          (Math.random() - 0.5) * 2 * config.microAmount,
+          (Math.random() - 0.5) * 2 * config.microAmount
+        );
+        state.lastMicroUpdate = t;
+      }
 
-    if (bones.head && rest.head) {
-      // x and z were set absolutely by sway above, so += is safe for micro offset.
-      // y is never set by sway, so use absolute assignment to prevent drift.
-      bones.head.rotation.x += state.microNoise.x;
-      bones.head.rotation.y = rest.head.y + state.microNoise.y;
-      bones.head.rotation.z += state.microNoise.z;
+      if (bones.head && rest.head) {
+        // x and z were set absolutely by sway above, so += is safe for micro offset.
+        // y is never set by sway, so use absolute assignment to prevent drift.
+        bones.head.rotation.x += state.microNoise.x;
+        bones.head.rotation.y = rest.head.y + state.microNoise.y;
+        bones.head.rotation.z += state.microNoise.z;
+      }
     }
 
     // ========================================
@@ -486,21 +490,23 @@ export function useIdleAnimation(
     }
 
     // Apply blink to eyelid bones (for models that use bone-based eyelids)
+    // Additive: preserves eyelid offsets set by expressionSystem (eye widen/squint)
     const eyelids = eyelidBonesRef.current;
-    const eyelidRest = eyelidRestRef.current;
     const eyelidCloseAmount = 0.5; // Radians to rotate eyelids when closing
 
-    if (eyelids.topL && eyelidRest.topL) {
-      eyelids.topL.rotation.x = eyelidRest.topL.x + blinkValue * eyelidCloseAmount;
-    }
-    if (eyelids.topR && eyelidRest.topR) {
-      eyelids.topR.rotation.x = eyelidRest.topR.x + blinkValue * eyelidCloseAmount;
-    }
-    if (eyelids.botL && eyelidRest.botL) {
-      eyelids.botL.rotation.x = eyelidRest.botL.x - blinkValue * eyelidCloseAmount * 0.3;
-    }
-    if (eyelids.botR && eyelidRest.botR) {
-      eyelids.botR.rotation.x = eyelidRest.botR.x - blinkValue * eyelidCloseAmount * 0.3;
+    if (blinkValue > 0.01) {
+      if (eyelids.topL) {
+        eyelids.topL.rotation.x += blinkValue * eyelidCloseAmount;
+      }
+      if (eyelids.topR) {
+        eyelids.topR.rotation.x += blinkValue * eyelidCloseAmount;
+      }
+      if (eyelids.botL) {
+        eyelids.botL.rotation.x -= blinkValue * eyelidCloseAmount * 0.3;
+      }
+      if (eyelids.botR) {
+        eyelids.botR.rotation.x -= blinkValue * eyelidCloseAmount * 0.3;
+      }
     }
 
     // ========================================

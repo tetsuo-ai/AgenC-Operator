@@ -121,6 +121,12 @@ interface UseVoicePipelineOptions {
   onGlitch: () => void;
   /** User ID for memory context (typically wallet address) */
   userId?: string;
+  /** Called with transcript text deltas for viseme lip sync */
+  onTranscriptDelta?: (text: string) => void;
+  /** Called with audio chunk duration (seconds) for viseme timing sync */
+  onAudioChunkDuration?: (durationSeconds: number) => void;
+  /** Called when a full response transcript is available, with detected emotion */
+  onEmotionDetected?: (emotion: string, intensity: number) => void;
 }
 
 interface UseVoicePipelineReturn {
@@ -140,6 +146,9 @@ export function useVoicePipeline({
   onError,
   onGlitch,
   userId,
+  onTranscriptDelta,
+  onAudioChunkDuration,
+  onEmotionDetected,
 }: UseVoicePipelineOptions): UseVoicePipelineReturn {
   const [isConnected, setIsConnected] = useState(false);
 
@@ -416,6 +425,10 @@ export function useVoicePipeline({
             if (audioQueueRef.current.length < MAX_AUDIO_QUEUE_SIZE) {
               audioQueueRef.current.push(audioData);
             }
+            // Notify viseme driver of audio chunk duration for timing sync
+            if (onAudioChunkDuration) {
+              onAudioChunkDuration(audioData.length / SAMPLE_RATE);
+            }
             // Non-blocking audio playback
             playAudioQueueNonBlocking();
           }
@@ -430,6 +443,10 @@ export function useVoicePipeline({
             ? response.delta
             : (response.delta.text || response.delta.transcript || '');
           currentTranscriptRef.current += deltaText;
+          // Feed text delta to viseme driver for lip sync
+          if (onTranscriptDelta && deltaText) {
+            onTranscriptDelta(deltaText);
+          }
         }
         break;
 
@@ -460,6 +477,14 @@ export function useVoicePipeline({
               text
             );
           }
+
+          // Detect emotion from transcript for expression system
+          if (onEmotionDetected) {
+            const detected = detectEmotionFromText(text);
+            if (detected) {
+              onEmotionDetected(detected.emotion, detected.intensity);
+            }
+          }
         }
         break;
 
@@ -474,7 +499,7 @@ export function useVoicePipeline({
         }
         break;
     }
-  }, [onVoiceStateChange, onMessage, onError, onGlitch, executeIntentNonBlocking, storeConversationMemory, userId]);
+  }, [onVoiceStateChange, onMessage, onError, onGlitch, executeIntentNonBlocking, storeConversationMemory, userId, onTranscriptDelta, onAudioChunkDuration, onEmotionDetected]);
 
   // ============================================================================
   // Audio Capture (Web Audio API)
@@ -801,6 +826,60 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+// ============================================================================
+// Emotion Detection (Simple Keyword-Based)
+// ============================================================================
+
+interface DetectedEmotion {
+  emotion: string;
+  intensity: number;
+}
+
+/**
+ * Simple keyword-based emotion detection from response text.
+ * Returns the dominant emotion or null if neutral.
+ */
+function detectEmotionFromText(text: string): DetectedEmotion | null {
+  const lower = text.toLowerCase();
+
+  // Check for question patterns → thinking
+  if (/\?/.test(text) && /(?:hmm|well|let me think|consider|perhaps)/i.test(text)) {
+    return { emotion: 'thinking', intensity: 0.7 };
+  }
+
+  // Apology / concern patterns
+  if (/(?:sorry|unfortunately|i apologize|my apologies|i'm afraid|sadly)/i.test(lower)) {
+    return { emotion: 'concerned', intensity: 0.6 };
+  }
+
+  // Excitement / emphasis patterns
+  if (/!{2,}/.test(text) || /(?:amazing|awesome|fantastic|excellent|incredible|perfect)/i.test(lower)) {
+    return { emotion: 'happy', intensity: 0.8 };
+  }
+
+  // Surprise patterns
+  if (/(?:whoa|wow|oh my|surprising|unexpected|didn't expect)/i.test(lower)) {
+    return { emotion: 'surprised', intensity: 0.7 };
+  }
+
+  // Positive sentiment
+  if (/(?:great|good|nice|sure|absolutely|definitely|happy to|glad|love)/i.test(lower)) {
+    return { emotion: 'happy', intensity: 0.5 };
+  }
+
+  // Attentive/listening patterns (explaining something)
+  if (/(?:so basically|here's how|the way it works|let me explain|in other words)/i.test(lower)) {
+    return { emotion: 'attentive', intensity: 0.6 };
+  }
+
+  // Curious patterns
+  if (/(?:interesting|curious|intriguing|tell me more|i wonder)/i.test(lower)) {
+    return { emotion: 'curious', intensity: 0.6 };
+  }
+
+  return null; // Neutral - no strong emotion detected
 }
 
 // ============================================================================

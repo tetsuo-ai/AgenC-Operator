@@ -25,6 +25,9 @@ import WalletDropdown from './components/WalletDropdown';
 import { useVoicePipeline } from './hooks/useVoicePipeline';
 import { useAppStore } from './hooks/useAppStore';
 import { useAvatarStore, CAMERA_PRESETS } from './stores/avatarStore';
+import { getGlobalVisemeDriver } from './hooks/useVisemeDriver';
+import { getGlobalExpressionSystem } from './hooks/useExpressionSystem';
+import type { EmotionType } from './hooks/useExpressionSystem';
 
 // Types
 import type { VoiceState, WalletInfo, ProtocolState, AgentStatus, CameraMode } from './types';
@@ -133,6 +136,31 @@ function App() {
     onGlitch: () => {
       setIsGlitching(true);
       setTimeout(() => setIsGlitching(false), 200);
+    },
+    // Feed transcript text to viseme driver for lip sync
+    onTranscriptDelta: (text) => {
+      getGlobalVisemeDriver()?.pushText(text);
+    },
+    // Feed audio chunk duration to viseme driver for timing sync
+    onAudioChunkDuration: (duration) => {
+      getGlobalVisemeDriver()?.pushAudioDuration(duration);
+    },
+    // Feed detected emotions to expression system for facial blending
+    onEmotionDetected: (emotion, intensity) => {
+      // Map voice pipeline emotion strings to EmotionType
+      const emotionMap: Record<string, EmotionType> = {
+        'happy': 'happy',
+        'sad': 'sad',
+        'angry': 'angry',
+        'surprised': 'surprised',
+        'thinking': 'thinking',
+        'concerned': 'concerned',
+        'attentive': 'listening',
+        'curious': 'thinking',
+        'neutral': 'neutral',
+      };
+      const mapped = emotionMap[emotion] ?? 'neutral';
+      getGlobalExpressionSystem()?.setEmotion(mapped, intensity);
     },
   });
 

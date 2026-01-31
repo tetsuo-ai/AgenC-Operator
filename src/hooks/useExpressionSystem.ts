@@ -106,6 +106,30 @@ interface ExpressionMorphRefs {
 
 type ExpressionType = 'happy' | 'thinking' | 'emphasis' | 'curious' | 'attentive' | 'surprised' | 'concerned';
 
+/** Continuous emotion type for blending (setEmotion) */
+export type EmotionType = 'neutral' | 'happy' | 'sad' | 'angry' | 'surprised' | 'thinking' | 'listening' | 'concerned';
+
+/** Emotion preset: defines bone offsets and morph weights for each emotion */
+interface EmotionPreset {
+  browRaise: number;       // Positive = raise, negative = knit
+  eyeWiden: number;        // Positive = widen, negative = squint
+  smileBoost: number;      // Smile intensity boost (0-1)
+  nostrilFlare: number;    // Nostril flare (0-1)
+  headPitchOffset: number; // Head tilt: positive = down
+  headRollOffset: number;  // Head tilt: positive = right
+}
+
+const EMOTION_PRESETS: Record<EmotionType, EmotionPreset> = {
+  neutral:   { browRaise: 0,     eyeWiden: 0,     smileBoost: 0,   nostrilFlare: 0,    headPitchOffset: 0,     headRollOffset: 0 },
+  happy:     { browRaise: 0.1,   eyeWiden: -0.02, smileBoost: 0.6, nostrilFlare: 0,    headPitchOffset: -0.02, headRollOffset: 0 },
+  sad:       { browRaise: -0.2,  eyeWiden: 0,     smileBoost: 0,   nostrilFlare: 0,    headPitchOffset: 0.06,  headRollOffset: 0 },
+  angry:     { browRaise: -0.35, eyeWiden: 0.02,  smileBoost: 0,   nostrilFlare: 0.05, headPitchOffset: 0.03,  headRollOffset: 0 },
+  surprised: { browRaise: 0.4,   eyeWiden: 0.08,  smileBoost: 0,   nostrilFlare: 0.03, headPitchOffset: -0.03, headRollOffset: 0 },
+  thinking:  { browRaise: 0.15,  eyeWiden: 0,     smileBoost: 0,   nostrilFlare: 0,    headPitchOffset: 0.03,  headRollOffset: 0.03 },
+  listening: { browRaise: 0.08,  eyeWiden: 0.02,  smileBoost: 0.1, nostrilFlare: 0,    headPitchOffset: 0.02,  headRollOffset: 0.03 },
+  concerned: { browRaise: -0.15, eyeWiden: 0,     smileBoost: 0,   nostrilFlare: 0,    headPitchOffset: 0.04,  headRollOffset: -0.02 },
+};
+
 interface ActiveExpression {
   type: ExpressionType;
   startTime: number;
@@ -133,15 +157,16 @@ interface ExpressionState {
   microExprType: 'brow_twitch' | 'lip_press' | 'none';
   microExprStart: number;
   microExprDuration: number;
-  // Eye gaze
-  gazeTargetX: number;
-  gazeTargetY: number;
-  gazeCurrentX: number;
-  gazeCurrentY: number;
-  nextGazeShiftTime: number;
   // Nostril flare
   nostrilFlareCurrent: number;
   nostrilFlareTarget: number;
+  // Emotion blending
+  currentEmotion: EmotionType;
+  targetEmotion: EmotionType;
+  emotionIntensity: number;
+  emotionBlendProgress: number; // 0 = at fromPreset, 1 = fully at targetEmotion
+  emotionBlendFrom: EmotionPreset;   // snapshot of visual state when blend started
+  emotionBlendedPreset: EmotionPreset;
   // Debug
   debugLogTime: number;
 }
@@ -155,8 +180,10 @@ export interface UseExpressionSystemReturn {
   initialize: (scene: THREE.Object3D) => void;
   /** Update expressions each frame. mouthOpen (0-1) enables speech-reactive brows. */
   update: (delta: number, isSpeaking: boolean, mouthOpen?: number) => void;
-  /** Trigger a specific expression */
+  /** Trigger a specific expression (timed, auto-fades) */
   triggerExpression: (type: ExpressionType, duration: number) => void;
+  /** Set a continuous emotion with smooth blending transition */
+  setEmotion: (emotion: EmotionType, intensity?: number) => void;
 }
 
 // ============================================================================
@@ -229,13 +256,14 @@ export function useExpressionSystem(
     microExprType: 'none',
     microExprStart: 0,
     microExprDuration: 0,
-    gazeTargetX: 0,
-    gazeTargetY: 0,
-    gazeCurrentX: 0,
-    gazeCurrentY: 0,
-    nextGazeShiftTime: Math.random() * 5 + 3,
     nostrilFlareCurrent: 0,
     nostrilFlareTarget: 0,
+    currentEmotion: 'neutral',
+    targetEmotion: 'neutral',
+    emotionIntensity: 1.0,
+    emotionBlendProgress: 1.0,
+    emotionBlendFrom: { ...EMOTION_PRESETS.neutral },
+    emotionBlendedPreset: { ...EMOTION_PRESETS.neutral },
     debugLogTime: 0,
   });
 
@@ -371,6 +399,31 @@ export function useExpressionSystem(
     const t = state.time;
 
     // ========================================
+    // Emotion Blending (continuous emotions set via setEmotion)
+    // ========================================
+    if (state.emotionBlendProgress < 1.0) {
+      state.emotionBlendProgress = Math.min(1.0, state.emotionBlendProgress + delta * 2.0); // ~0.5s transition
+      const fromPreset = state.emotionBlendFrom;
+      const toPreset = EMOTION_PRESETS[state.targetEmotion];
+      const t2 = state.emotionBlendProgress;
+      // Smooth step for natural easing
+      const s = t2 * t2 * (3 - 2 * t2);
+      state.emotionBlendedPreset = {
+        browRaise: fromPreset.browRaise + (toPreset.browRaise - fromPreset.browRaise) * s,
+        eyeWiden: fromPreset.eyeWiden + (toPreset.eyeWiden - fromPreset.eyeWiden) * s,
+        smileBoost: fromPreset.smileBoost + (toPreset.smileBoost - fromPreset.smileBoost) * s,
+        nostrilFlare: fromPreset.nostrilFlare + (toPreset.nostrilFlare - fromPreset.nostrilFlare) * s,
+        headPitchOffset: fromPreset.headPitchOffset + (toPreset.headPitchOffset - fromPreset.headPitchOffset) * s,
+        headRollOffset: fromPreset.headRollOffset + (toPreset.headRollOffset - fromPreset.headRollOffset) * s,
+      };
+      if (state.emotionBlendProgress >= 1.0) {
+        state.currentEmotion = state.targetEmotion;
+      }
+    }
+    const emo = state.emotionBlendedPreset;
+    const emoIntensity = state.emotionIntensity;
+
+    // ========================================
     // Random Smile Trigger
     // ========================================
     const smileChancePerFrame = (config.smileChancePerMinute / 60) * delta;
@@ -465,22 +518,8 @@ export function useExpressionSystem(
       }
     }
 
-    // ========================================
-    // Eye Gaze Shifts (idle only)
-    // ========================================
-    if (!isSpeaking && t >= state.nextGazeShiftTime) {
-      // Pick a new random gaze target
-      state.gazeTargetX = (Math.random() - 0.5) * 0.06; // ±0.03 rad
-      state.gazeTargetY = (Math.random() - 0.5) * 0.04; // ±0.02 rad
-      state.nextGazeShiftTime = t + 3 + Math.random() * 5;
-    }
-    if (isSpeaking) {
-      // Look at user when speaking (return to rest)
-      state.gazeTargetX = 0;
-      state.gazeTargetY = 0;
-    }
-    state.gazeCurrentX = THREE.MathUtils.lerp(state.gazeCurrentX, state.gazeTargetX, delta * 2);
-    state.gazeCurrentY = THREE.MathUtils.lerp(state.gazeCurrentY, state.gazeTargetY, delta * 2);
+    // NOTE: Eye gaze shifts removed — useGazeTracking is sole authority
+    // over eyeL/eyeR bone rotation (cursor tracking, saccades, wander).
 
     // ========================================
     // Triggered Expression
@@ -533,13 +572,25 @@ export function useExpressionSystem(
       }
     }
 
-    // Combine speech-reactive brow with triggered expressions
+    // ========================================
+    // Add Emotion Preset Contributions
+    // ========================================
+    if (emo.browRaise >= 0) {
+      browRaiseAmount += emo.browRaise * emoIntensity;
+    } else {
+      browKnitAmount += Math.abs(emo.browRaise) * emoIntensity;
+    }
+    eyeWidenAmount += emo.eyeWiden * emoIntensity;
+    expressionSmileBoost += emo.smileBoost * emoIntensity;
+    expressionNostrilFlare += emo.nostrilFlare * emoIntensity;
+
+    // Combine speech-reactive brow with triggered expressions + emotion
     browRaiseAmount = Math.min(config.browEmphasisAmount * 1.5, browRaiseAmount + state.speechBrowCurrent);
 
     // Combine nostril flare sources
     const totalNostrilFlare = state.nostrilFlareCurrent + expressionNostrilFlare;
 
-    // Total smile: random smiles + triggered expression boosts
+    // Total smile: random smiles + triggered expression boosts + emotion
     const totalSmile = Math.min(1, state.smileIntensityCurrent + expressionSmileBoost);
 
     // Happy eyes during speech (subtle eyelid squint)
@@ -705,25 +756,7 @@ export function useExpressionSystem(
       );
     }
 
-    // ========================================
-    // Apply Eye Gaze
-    // ========================================
-    if (bones.eyeL && rest.eyeL) {
-      bones.eyeL.rotation.x = THREE.MathUtils.lerp(
-        bones.eyeL.rotation.x, rest.eyeL.x + state.gazeCurrentY, delta * 4
-      );
-      bones.eyeL.rotation.y = THREE.MathUtils.lerp(
-        bones.eyeL.rotation.y, rest.eyeL.y + state.gazeCurrentX, delta * 4
-      );
-    }
-    if (bones.eyeR && rest.eyeR) {
-      bones.eyeR.rotation.x = THREE.MathUtils.lerp(
-        bones.eyeR.rotation.x, rest.eyeR.x + state.gazeCurrentY, delta * 4
-      );
-      bones.eyeR.rotation.y = THREE.MathUtils.lerp(
-        bones.eyeR.rotation.y, rest.eyeR.y + state.gazeCurrentX, delta * 4
-      );
-    }
+    // NOTE: Eye gaze application removed — useGazeTracking handles eye bones
 
     // ========================================
     // Apply Nostril Flare
@@ -798,8 +831,8 @@ export function useExpressionSystem(
         `[ExpressionSystem] smile=${totalSmile.toFixed(2)}, ` +
         `browRaise=${browRaiseAmount.toFixed(2)}, ` +
         `eyeWiden=${eyeWidenAmount.toFixed(2)}, ` +
-        `gaze=(${state.gazeCurrentX.toFixed(3)},${state.gazeCurrentY.toFixed(3)}), ` +
         `nostril=${totalNostrilFlare.toFixed(3)}, ` +
+        `emotion=${state.currentEmotion}(${emoIntensity.toFixed(2)}), ` +
         `speaking=${isSpeaking}`
       );
     }
@@ -820,9 +853,48 @@ export function useExpressionSystem(
     log.debug(`[ExpressionSystem] Triggered expression: ${type} (${duration}s)`);
   }, []);
 
+  // ============================================================================
+  // Set Emotion (continuous blending)
+  // ============================================================================
+
+  const setEmotion = useCallback((emotion: EmotionType, intensity: number = 1.0) => {
+    const state = stateRef.current;
+    // Don't restart blend if already targeting the same emotion
+    if (state.targetEmotion === emotion && Math.abs(state.emotionIntensity - intensity) < 0.01) {
+      return;
+    }
+    // Snapshot current visual state as the blend-from point
+    state.emotionBlendFrom = { ...state.emotionBlendedPreset };
+    state.targetEmotion = emotion;
+    state.emotionIntensity = intensity;
+    state.emotionBlendProgress = 0; // restart blend
+    log.debug(`[ExpressionSystem] Emotion → ${emotion} (intensity=${intensity.toFixed(2)})`);
+  }, []);
+
+  // Register this instance as the global expression system so the voice pipeline
+  // (which lives in a different component tree) can push emotions.
+  globalExpressionSystemRef = { setEmotion, triggerExpression };
+
   return {
     initialize,
     update,
     triggerExpression,
+    setEmotion,
   };
+}
+
+// ============================================================================
+// Global Bridge (connects voice pipeline in App.tsx to expression system in avatar)
+// ============================================================================
+
+interface GlobalExpressionSystem {
+  setEmotion: (emotion: EmotionType, intensity?: number) => void;
+  triggerExpression: (type: ExpressionType, duration: number) => void;
+}
+
+let globalExpressionSystemRef: GlobalExpressionSystem | null = null;
+
+/** Get the global expression system instance (set by the first useExpressionSystem hook) */
+export function getGlobalExpressionSystem(): GlobalExpressionSystem | null {
+  return globalExpressionSystemRef;
 }
