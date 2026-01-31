@@ -12,6 +12,7 @@
 
 pub mod access;
 pub mod auth;
+pub mod db;
 pub mod executor;
 pub mod memory;
 pub mod policy_gate;
@@ -49,6 +50,12 @@ pub use executor::{
     CommentResult, GistResult, IssueResult, WorkflowResult,
     // Slack types
     Block, ContextElement, MrkdwnText, PlainText, SlackResult,
+};
+
+// Database
+pub use db::{
+    DbTaskStatus, OperatorConfig as DbOperatorConfig, OperatorDb, SessionState, TaskRecord,
+    TranscriptEntry, VerificationLog,
 };
 
 // Transaction retry

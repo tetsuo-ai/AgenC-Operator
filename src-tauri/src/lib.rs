@@ -28,6 +28,8 @@ use operator_core::{
     CreateGistParams, CreateGitHubIssueParams, AddGitHubCommentParams, TriggerGitHubWorkflowParams,
     // Auth
     auth::{TwitterOAuth, TwitterTokens},
+    // Database
+    OperatorDb, TaskRecord, DbTaskStatus,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -60,6 +62,8 @@ pub struct AppState {
     pub image_executor: Arc<RwLock<Option<ImageExecutor>>>,
     // Phase 4: GitHub executor
     pub github_executor: Arc<RwLock<Option<GitHubExecutor>>>,
+    // Phase 5: Embedded database
+    pub db: Arc<RwLock<Option<OperatorDb>>>,
 }
 
 /// Application configuration
@@ -1324,13 +1328,56 @@ async fn route_solana(
     intent: &VoiceIntent,
 ) -> Result<AsyncResult<ExecutionResult>, String> {
     let executor = Arc::clone(&state.executor);
+    let db = Arc::clone(&state.db);
     let intent_clone = intent.clone();
+    let action = intent.action.clone();
 
     // Spawn the chain operation - this is the slow part
     let handle = tokio::spawn(async move {
         debug!("[SPAWN] Executing intent on chain...");
         let exec = executor.read().await;
-        exec.execute_intent(&intent_clone).await
+        let result = exec.execute_intent(&intent_clone).await?;
+
+        // Wire database persistence for task operations
+        if result.success {
+            let db_guard = db.read().await;
+            if let Some(db) = db_guard.as_ref() {
+                match &action {
+                    IntentAction::ClaimTask => {
+                        if let Ok(params) = serde_json::from_value::<operator_core::ClaimTaskParams>(intent_clone.params.clone()) {
+                            let task_record = TaskRecord {
+                                task_id: params.task_id.clone(),
+                                payload: serde_json::to_vec(&intent_clone.params).unwrap_or_default(),
+                                status: DbTaskStatus::Claimed,
+                                claimed_at: chrono::Utc::now().timestamp(),
+                                completed_at: None,
+                                on_chain_signature: result.signature.clone(),
+                                description: None,
+                                reward_lamports: None,
+                                creator: None,
+                            };
+                            if let Err(e) = db.store_task(&task_record) {
+                                warn!("Failed to store claimed task in DB: {}", e);
+                            } else {
+                                info!("Task {} stored in local database", params.task_id);
+                            }
+                        }
+                    }
+                    IntentAction::CompleteTask => {
+                        if let Ok(params) = serde_json::from_value::<operator_core::CompleteTaskParams>(intent_clone.params.clone()) {
+                            if let Err(e) = db.update_task_status(&params.task_id, DbTaskStatus::Completed) {
+                                warn!("Failed to update task status in DB: {}", e);
+                            } else {
+                                info!("Task {} marked completed in local database", params.task_id);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok::<_, anyhow::Error>(result)
     });
 
     match handle.await {
@@ -2723,6 +2770,66 @@ fn frontend_log(level: String, message: String) {
 }
 
 // ============================================================================
+// Database Commands (Phase 5)
+// ============================================================================
+
+/// List tasks from the local database
+#[tauri::command]
+async fn db_list_tasks(
+    state: State<'_, AppState>,
+    status: Option<String>,
+) -> Result<AsyncResult<Vec<serde_json::Value>>, String> {
+    debug!("[IPC] db_list_tasks (status={:?})", status);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let status_filter = status.as_deref().and_then(|s| match s {
+                "claimed" => Some(DbTaskStatus::Claimed),
+                "in_progress" => Some(DbTaskStatus::InProgress),
+                "completed" => Some(DbTaskStatus::Completed),
+                "disputed" => Some(DbTaskStatus::Disputed),
+                "resolved" => Some(DbTaskStatus::Resolved),
+                _ => None,
+            });
+
+            match db.list_tasks(status_filter.as_ref()) {
+                Ok(tasks) => {
+                    let json_tasks: Vec<serde_json::Value> = tasks
+                        .iter()
+                        .map(|t| serde_json::to_value(t).unwrap_or_default())
+                        .collect();
+                    Ok(AsyncResult::ok(json_tasks))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+/// Get a specific task from the local database
+#[tauri::command]
+async fn db_get_task(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_get_task: {}", task_id);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.get_task(&task_id) {
+            Ok(Some(task)) => Ok(AsyncResult::ok(
+                serde_json::to_value(&task).unwrap_or_default(),
+            )),
+            Ok(None) => Ok(AsyncResult::err(format!("Task not found: {}", task_id))),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+// ============================================================================
 // Application Setup
 // ============================================================================
 
@@ -2827,6 +2934,26 @@ pub fn run() {
         )
     });
 
+    // Phase 5: Initialize embedded database
+    let operator_db = match OperatorDb::open(None) {
+        Ok(db) => {
+            info!("Operator database initialized at: {}", db.path().display());
+            match db.list_tasks(Some(&DbTaskStatus::Claimed)) {
+                Ok(pending) => {
+                    if !pending.is_empty() {
+                        info!("Loaded {} pending tasks from database", pending.len());
+                    }
+                }
+                Err(e) => warn!("Failed to load pending tasks: {}", e),
+            }
+            Some(db)
+        }
+        Err(e) => {
+            warn!("Failed to init operator database: {} - running without persistence", e);
+            None
+        }
+    };
+
     let state = AppState {
         executor: Arc::new(RwLock::new(executor)),
         policy: Arc::new(RwLock::new(PolicyGate::new())),
@@ -2844,6 +2971,8 @@ pub fn run() {
         image_executor: Arc::new(RwLock::new(image_executor)),
         // Phase 4: GitHub executor
         github_executor: Arc::new(RwLock::new(github_executor)),
+        // Phase 5: Embedded database
+        db: Arc::new(RwLock::new(operator_db)),
     };
 
     tauri::Builder::default()
@@ -2913,6 +3042,9 @@ pub fn run() {
             // Config
             set_rpc_url,
             get_config,
+            // Database (Phase 5)
+            db_list_tasks,
+            db_get_task,
             // Debug
             frontend_log,
         ])
