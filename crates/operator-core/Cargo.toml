@@ -66,6 +66,10 @@ base64 = "0.22"
 # Transaction serialization
 bincode = "1.3"
 
+# Embedded database for local state
+redb = { workspace = true }
+dirs = { workspace = true }
+
 # Twitter OAuth 2.0 + PKCE
 tiny_http = "0.12"
 sha2 = "0.10"

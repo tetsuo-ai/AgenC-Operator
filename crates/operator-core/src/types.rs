@@ -437,6 +437,9 @@ pub struct ImageGenParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageGenResult {
     pub path: String,
+    /// Base64-encoded PNG image data for inline display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub b64_data: Option<String>,
 }
 
 // ============================================================================

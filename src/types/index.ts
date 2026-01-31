@@ -240,6 +240,7 @@ export interface BulkEmailParams {
 
 export interface ImageGenResult {
   path: string;
+  b64_data?: string;
 }
 
 export interface ImageGenParams {

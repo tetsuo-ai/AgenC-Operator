@@ -1065,6 +1065,37 @@ export const TaskAPI = {
   },
 };
 
+// ============================================================================
+// Database API (Local Persistence - Phase 5)
+// ============================================================================
+
+export const DatabaseAPI = {
+  /**
+   * List tasks from the local database
+   * @param status - Optional filter: "claimed" | "in_progress" | "completed" | "disputed" | "resolved"
+   */
+  listLocalTasks(status?: string): Promise<unknown[]> {
+    return invoke<AsyncResult<unknown[]>>('db_list_tasks', { status })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] dbListTasks failed:', err);
+        return [];
+      });
+  },
+
+  /**
+   * Get a specific task from the local database
+   */
+  getLocalTask(taskId: string): Promise<unknown | null> {
+    return invoke<AsyncResult<unknown>>('db_get_task', { taskId })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] dbGetTask failed:', err);
+        return null;
+      });
+  },
+};
+
 export const TetsuoAPI = {
   wallet: WalletAPI,
   intent: IntentAPI,
@@ -1087,6 +1118,8 @@ export const TetsuoAPI = {
   image: ImageAPI,
   // Phase 4 APIs
   github: GitHubAPI,
+  // Phase 5 APIs
+  database: DatabaseAPI,
 };
 
 export default TetsuoAPI;
