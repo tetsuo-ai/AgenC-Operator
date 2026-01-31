@@ -31,6 +31,7 @@ import {
   type BoneInfo,
 } from '../utils/glbInspector';
 import { log } from '../utils/log';
+import type { VisemeWeights } from '../constants/visemeMap';
 
 // ============================================================================
 // Configuration
@@ -87,6 +88,8 @@ export interface UseMouthAnimationReturn {
   getState: () => MouthAnimationState;
   /** Apply mouth animation to the model (call in useFrame) */
   applyMouthAnimation: () => void;
+  /** Set viseme target weights (call before applyMouthAnimation). Pass null to disable viseme mode. */
+  setVisemeTarget: (weights: VisemeWeights | null) => void;
   /** Connect an AudioBufferSourceNode to the analyser */
   connectAudioSource: (source: AudioBufferSourceNode) => void;
   /** Get the AudioContext for creating sources */
@@ -149,6 +152,8 @@ export function useMouthAnimation(
   // Lip bone refs for Genesis 9 facial rig
   const lipBonesRef = useRef<LipBoneRefs>({});
   const lipRestPosesRef = useRef<LipBoneRestPoses>({});
+  // Viseme target: when non-null, lip bones are driven by viseme shapes
+  const visemeTargetRef = useRef<VisemeWeights | null>(null);
 
   // Get or create the global audio context and mouth driver
   const getAudioContext = useCallback((): AudioContext => {
@@ -254,6 +259,11 @@ export function useMouthAnimation(
     initializedRef.current = true;
   }, [getMouthDriver]);
 
+  // Set viseme target weights (call before applyMouthAnimation each frame)
+  const setVisemeTarget = useCallback((weights: VisemeWeights | null) => {
+    visemeTargetRef.current = weights;
+  }, []);
+
   // Get current state
   const getState = useCallback((): MouthAnimationState => {
     const driver = driverRef.current;
@@ -351,39 +361,98 @@ export function useMouthAnimation(
     // ======================================================================
     const lips = lipBonesRef.current;
     const lipRest = lipRestPosesRef.current;
+    const viseme = visemeTargetRef.current;
 
     if (Object.keys(lips).length > 0) {
-      // Lower lip follows jaw opening (rotate downward = positive X)
-      const lipLowerAmount = finalMouth * 0.08;
-      if (lips.centerLower && lipRest.centerLower) {
-        lips.centerLower.rotation.x = lipRest.centerLower.x + lipLowerAmount;
-      }
-      if (lips.lowerL && lipRest.lowerL) {
-        lips.lowerL.rotation.x = lipRest.lowerL.x + lipLowerAmount * 0.7;
-      }
-      if (lips.lowerR && lipRest.lowerR) {
-        lips.lowerR.rotation.x = lipRest.lowerR.x + lipLowerAmount * 0.7;
-      }
+      if (viseme) {
+        // === VISEME MODE: Drive lips from viseme shape weights ===
+        // Amplitude modulates the overall intensity of the viseme shape
+        const intensity = Math.max(0.3, finalMouth * 1.5); // Minimum 0.3 so shapes are visible even at low amplitude
 
-      // Upper lip lifts slightly during speech (negative X = upward)
-      const lipUpperAmount = finalMouth * 0.03;
-      if (lips.centerUpper && lipRest.centerUpper) {
-        lips.centerUpper.rotation.x = lipRest.centerUpper.x - lipUpperAmount;
-      }
-      if (lips.upperL && lipRest.upperL) {
-        lips.upperL.rotation.x = lipRest.upperL.x - lipUpperAmount * 0.6;
-      }
-      if (lips.upperR && lipRest.upperR) {
-        lips.upperR.rotation.x = lipRest.upperR.x - lipUpperAmount * 0.6;
-      }
+        // Jaw open: driven by viseme jawOpen weight, modulated by amplitude
+        // (jaw bone was already set above from amplitude — override with viseme-aware value)
+        if (jawBoneRef.current && jawRestRotationRef.current) {
+          const jawAmount = viseme.jawOpen * intensity * cfg.maxJawRotation * cfg.jawRotationDirection;
+          const bone = jawBoneRef.current.bone;
+          const rest = jawRestRotationRef.current;
+          switch (cfg.jawRotationAxis) {
+            case 'x': bone.rotation.x = rest.x + jawAmount; break;
+            case 'y': bone.rotation.y = rest.y + jawAmount; break;
+            case 'z': bone.rotation.z = rest.z + jawAmount; break;
+          }
+        }
 
-      // Lip corners spread slightly when mouth opens wide (positive Z = outward)
-      const lipCornerAmount = finalMouth * 0.04;
-      if (lips.cornerL && lipRest.cornerL) {
-        lips.cornerL.rotation.z = lipRest.cornerL.z + lipCornerAmount;
-      }
-      if (lips.cornerR && lipRest.cornerR) {
-        lips.cornerR.rotation.z = lipRest.cornerR.z - lipCornerAmount;
+        // Lower lip: drop amount from viseme
+        const lipLowerDrop = viseme.lipLowerDrop * intensity * 0.1;
+        if (lips.centerLower && lipRest.centerLower) {
+          lips.centerLower.rotation.x = lipRest.centerLower.x + lipLowerDrop;
+        }
+        if (lips.lowerL && lipRest.lowerL) {
+          lips.lowerL.rotation.x = lipRest.lowerL.x + lipLowerDrop * 0.7;
+        }
+        if (lips.lowerR && lipRest.lowerR) {
+          lips.lowerR.rotation.x = lipRest.lowerR.x + lipLowerDrop * 0.7;
+        }
+
+        // Upper lip: raise amount from viseme
+        const lipUpperRaise = viseme.lipUpperRaise * intensity * 0.06;
+        if (lips.centerUpper && lipRest.centerUpper) {
+          lips.centerUpper.rotation.x = lipRest.centerUpper.x - lipUpperRaise;
+        }
+        if (lips.upperL && lipRest.upperL) {
+          lips.upperL.rotation.x = lipRest.upperL.x - lipUpperRaise * 0.6;
+        }
+        if (lips.upperR && lipRest.upperR) {
+          lips.upperR.rotation.x = lipRest.upperR.x - lipUpperRaise * 0.6;
+        }
+
+        // Lip corners: stretch (spread outward) vs pucker (push forward)
+        // Stretch uses Z rotation (outward), pucker uses Y rotation (forward)
+        const stretchAmount = viseme.lipStretch * intensity * 0.06;
+        const puckerAmount = viseme.lipPucker * intensity * 0.05;
+        if (lips.cornerL && lipRest.cornerL) {
+          lips.cornerL.rotation.z = lipRest.cornerL.z + stretchAmount;
+          lips.cornerL.rotation.y = lipRest.cornerL.y + puckerAmount;
+        }
+        if (lips.cornerR && lipRest.cornerR) {
+          lips.cornerR.rotation.z = lipRest.cornerR.z - stretchAmount;
+          lips.cornerR.rotation.y = lipRest.cornerR.y - puckerAmount;
+        }
+      } else {
+        // === AMPLITUDE MODE: Original simple lip animation ===
+
+        // Lower lip follows jaw opening (rotate downward = positive X)
+        const lipLowerAmount = finalMouth * 0.08;
+        if (lips.centerLower && lipRest.centerLower) {
+          lips.centerLower.rotation.x = lipRest.centerLower.x + lipLowerAmount;
+        }
+        if (lips.lowerL && lipRest.lowerL) {
+          lips.lowerL.rotation.x = lipRest.lowerL.x + lipLowerAmount * 0.7;
+        }
+        if (lips.lowerR && lipRest.lowerR) {
+          lips.lowerR.rotation.x = lipRest.lowerR.x + lipLowerAmount * 0.7;
+        }
+
+        // Upper lip lifts slightly during speech (negative X = upward)
+        const lipUpperAmount = finalMouth * 0.03;
+        if (lips.centerUpper && lipRest.centerUpper) {
+          lips.centerUpper.rotation.x = lipRest.centerUpper.x - lipUpperAmount;
+        }
+        if (lips.upperL && lipRest.upperL) {
+          lips.upperL.rotation.x = lipRest.upperL.x - lipUpperAmount * 0.6;
+        }
+        if (lips.upperR && lipRest.upperR) {
+          lips.upperR.rotation.x = lipRest.upperR.x - lipUpperAmount * 0.6;
+        }
+
+        // Lip corners spread slightly when mouth opens wide (positive Z = outward)
+        const lipCornerAmount = finalMouth * 0.04;
+        if (lips.cornerL && lipRest.cornerL) {
+          lips.cornerL.rotation.z = lipRest.cornerL.z + lipCornerAmount;
+        }
+        if (lips.cornerR && lipRest.cornerR) {
+          lips.cornerR.rotation.z = lipRest.cornerR.z - lipCornerAmount;
+        }
       }
     }
   }, []);
@@ -401,6 +470,7 @@ export function useMouthAnimation(
     }
     smoothedMouthRef.current = 0;
     prevMouthRef.current = 0;
+    visemeTargetRef.current = null;
     // Reset morph target
     if (morphTargetRef.current) {
       const { mesh, index } = morphTargetRef.current;
@@ -433,6 +503,7 @@ export function useMouthAnimation(
     initialize,
     getState,
     applyMouthAnimation,
+    setVisemeTarget,
     connectAudioSource,
     getAudioContext,
     getMouthDriver,

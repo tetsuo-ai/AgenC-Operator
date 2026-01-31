@@ -433,8 +433,10 @@ export function categorizeMaterial(
   const combined = `${meshName} ${materialName}`.toLowerCase();
 
   if (config.skin.some(p => p.test(combined))) return 'skin';
-  if (config.eyes.some(p => p.test(combined))) return 'eyes';
+  // Hair checked before eyes so /brow/i and /lash/i catch eyebrow/eyelash
+  // materials before /eye/i grabs them
   if (config.hair.some(p => p.test(combined))) return 'hair';
+  if (config.eyes.some(p => p.test(combined))) return 'eyes';
   if (config.mouth.some(p => p.test(combined))) return 'mouth';
   if (config.clothing.some(p => p.test(combined))) return 'clothing';
   if (config.accent.some(p => p.test(combined))) return 'accent';
