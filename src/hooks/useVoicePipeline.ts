@@ -33,6 +33,10 @@ import type {
 const GROK_WS_URL = 'wss://api.x.ai/v1/realtime';
 const SAMPLE_RATE = 24000;
 const MAX_AUDIO_QUEUE_SIZE = 200; // Cap buffered chunks to prevent unbounded memory growth
+const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 30000;
+const CONNECTION_TIMEOUT_MS = 10000;
 
 // Debug flag - enable via VITE_DEBUG env var or set manually for development
 // Kept off by default to avoid leaking sensitive protocol/session data to console
@@ -162,6 +166,10 @@ export function useVoicePipeline({
   const currentTranscriptRef = useRef<string>('');
   const responseDoneRef = useRef(false); // Track when response.done received
   const currentUserMessageRef = useRef<string>(''); // Track current user message for memory storage
+
+  // Reconnection state
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ============================================================================
   // Intent Execution (Fire-and-Forget)
@@ -295,7 +303,17 @@ export function useVoicePipeline({
       );
       ws.binaryType = 'arraybuffer';
 
+      // Connection timeout — close if WebSocket doesn't open in time
+      const connectionTimeout = setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          log.warn('[Voice] Connection timeout after ' + CONNECTION_TIMEOUT_MS + 'ms');
+          ws.close();
+        }
+      }, CONNECTION_TIMEOUT_MS);
+
       ws.onopen = async () => {
+        clearTimeout(connectionTimeout);
+        reconnectAttemptsRef.current = 0;
         log.info('[Voice] WebSocket connected to x.ai');
         if (DEBUG_WS) log.debug('[Voice] Sending session config...');
         setIsConnected(true);
@@ -369,21 +387,46 @@ export function useVoicePipeline({
       };
 
       ws.onerror = (event) => {
+        clearTimeout(connectionTimeout);
         log.error('[Voice] WebSocket error');
-        // Try to get more error details
         const errorDetails = (event as any).message || (event as any).error || 'Unknown error';
         log.error('[Voice] Error details: ' + errorDetails);
-        onError('Voice API connection failed. Check your API key and network connection.');
         setIsConnected(false);
       };
 
       ws.onclose = (event) => {
+        clearTimeout(connectionTimeout);
         log.info('[Voice] WebSocket closed: ' + event.code + ' ' + event.reason);
-        if (event.code !== 1000) {
-          log.warn('[Voice] Abnormal close - code: ' + event.code + ' reason: ' + event.reason);
-        }
         setIsConnected(false);
-        onVoiceStateChange('idle');
+
+        // Normal closure — don't reconnect
+        if (event.code === 1000) {
+          onVoiceStateChange('idle');
+          return;
+        }
+
+        log.warn('[Voice] Abnormal close - code: ' + event.code + ' reason: ' + event.reason);
+
+        // Max retries exceeded
+        if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+          log.error('[Voice] Max reconnection attempts reached (' + MAX_RECONNECT_ATTEMPTS + ')');
+          onError('Voice connection lost after ' + MAX_RECONNECT_ATTEMPTS + ' reconnection attempts. Please try again.');
+          onVoiceStateChange('error');
+          reconnectAttemptsRef.current = 0;
+          return;
+        }
+
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s (capped at 30s)
+        const attempt = reconnectAttemptsRef.current;
+        const delay = Math.min(INITIAL_BACKOFF_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
+        reconnectAttemptsRef.current += 1;
+
+        log.info('[Voice] Reconnecting in ' + delay + 'ms (attempt ' + reconnectAttemptsRef.current + '/' + MAX_RECONNECT_ATTEMPTS + ')');
+        onVoiceStateChange('reconnecting');
+
+        reconnectTimerRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, delay);
       };
 
       wsRef.current = ws;
@@ -796,8 +839,11 @@ export function useVoicePipeline({
   useEffect(() => {
     return () => {
       stopAudioCapture();
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+      }
       if (wsRef.current) {
-        wsRef.current.close();
+        wsRef.current.close(1000, 'Component unmount');
       }
     };
   }, [stopAudioCapture]);

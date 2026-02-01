@@ -121,7 +121,7 @@ export interface ExecutionResult {
 // Voice State
 // ============================================================================
 
-export type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'error';
+export type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking' | 'error' | 'reconnecting';
 
 // ============================================================================
 // App Configuration
