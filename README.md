@@ -7,7 +7,12 @@ A cyberpunk themed voice controlled desktop operator for the [AgenC Solana proto
 
 <img width="1407" height="665" alt="image" src="https://github.com/user-attachments/assets/c1df306e-2f2e-46a2-9d33-79ff1348cb63" />
 
-
+[![CI](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml/badge.svg)](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tauri v2](https://img.shields.io/badge/Tauri-v2-orange)](https://v2.tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org)
+[![Solana](https://img.shields.io/badge/Solana-SDK%202.0-purple?logo=solana)](https://solana.com)
 
 ## Features
 
