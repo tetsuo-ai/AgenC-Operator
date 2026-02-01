@@ -7,6 +7,7 @@
 resolver = "2"
 members = [
     "crates/operator-core",
+    "crates/operator-cli",
     "src-tauri",
 ]
 
@@ -76,3 +77,6 @@ redb = "2.4"
 
 # Home directory resolution
 dirs = "5.0"
+
+# CLI parsing
+clap = { version = "4.4", features = ["derive"] }
