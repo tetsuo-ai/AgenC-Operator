@@ -18,7 +18,6 @@
 import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { VoiceState } from '../types';
-import { NEON_PALETTE } from '../styles/palette';
 import { useMouthOpen2D } from '../hooks/useMouthAnimation';
 
 interface TetsuoHologramProps {
