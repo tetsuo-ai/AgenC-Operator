@@ -92,6 +92,7 @@ function VoiceStateIndicator({ state }: { state: VoiceState }) {
     processing: { color: 'bg-neon-magenta', label: 'PROC' },
     speaking: { color: 'bg-neon-cyan', label: 'SPEAK' },
     error: { color: 'bg-red-500', label: 'ERR' },
+    reconnecting: { color: 'bg-yellow-500', label: 'RECONN' },
   };
 
   const config = stateConfig[state];

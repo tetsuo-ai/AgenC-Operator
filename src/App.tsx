@@ -104,6 +104,7 @@ function App() {
       processing: 'thinking',
       speaking: 'speaking',
       error: 'error',
+      reconnecting: 'error',
     };
 
     return {
