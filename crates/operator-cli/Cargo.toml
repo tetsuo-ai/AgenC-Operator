@@ -1,0 +1,16 @@
+[package]
+name = "operator-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "agenc-db"
+path = "src/main.rs"
+
+[dependencies]
+operator-core = { path = "../operator-core" }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
