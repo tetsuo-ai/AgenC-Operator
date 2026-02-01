@@ -18,7 +18,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, useAppearance, usePresets } from '../hooks/useAppStore';
-import { useAvatarStore, CAMERA_PRESETS } from '../stores/avatarStore';
+import { useAvatarStore } from '../stores/avatarStore';
 import type { AgentAppearance, CameraMode } from '../types';
 
 // ============================================================================

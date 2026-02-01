@@ -9,7 +9,7 @@
  * ============================================================================
  */
 
-import { useRef, useCallback } from 'react';
+import { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useAvatarStore } from '../stores/avatarStore';

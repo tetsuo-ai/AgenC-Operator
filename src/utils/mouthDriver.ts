@@ -56,7 +56,7 @@ const DEFAULT_CONFIG: MouthDriverConfig = {
 export class MouthDriver {
   private analyser: AnalyserNode;
   private gainNode: GainNode;
-  private timeDomainData: Float32Array;
+  private timeDomainData = new Float32Array(0);
   private currentValue: number = 0;
   private config: MouthDriverConfig;
 

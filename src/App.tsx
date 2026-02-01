@@ -26,7 +26,7 @@ import TaskMarketplace from './components/TaskMarketplace';
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
 import { useAppStore } from './hooks/useAppStore';
-import { useAvatarStore, CAMERA_PRESETS } from './stores/avatarStore';
+import { useAvatarStore } from './stores/avatarStore';
 import { getGlobalVisemeDriver } from './hooks/useVisemeDriver';
 import { getGlobalExpressionSystem } from './hooks/useExpressionSystem';
 import type { EmotionType } from './hooks/useExpressionSystem';

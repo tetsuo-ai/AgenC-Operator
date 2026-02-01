@@ -19,7 +19,6 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentAppearance, AgentStatus } from '../../types';
-import { NEON_PALETTE } from '../../styles/palette';
 import { useMouthOpen2D } from '../../hooks/useMouthAnimation';
 
 // ============================================================================
@@ -59,8 +58,6 @@ export default function TetsuoAvatar2D({ appearance, status }: TetsuoAvatar2DPro
 
   const {
     accentColor,
-    hairColor,
-    eyeGlowColor,
     effects,
     effectsIntensity,
   } = appearance;

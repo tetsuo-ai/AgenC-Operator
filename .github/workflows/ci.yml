@@ -26,21 +26,22 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: TypeScript type check
         run: npm run typecheck
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true  # eslint config may not be fully set up yet
+        continue-on-error: true
 
   # ─────────────────────────────────────────────
   # Rust checks (cargo check + clippy)
+  # Runs on Ubuntu and macOS only. Windows Rust
+  # checks are covered by the build job.
   # ─────────────────────────────────────────────
   rust:
     name: Rust checks (${{ matrix.os }})
@@ -48,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        os: [ubuntu-22.04, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +76,12 @@ jobs:
         with:
           key: ${{ matrix.os }}
 
+      # Tauri's generate_context!() macro requires the frontendDist
+      # directory to exist at compile time. Create a stub so cargo
+      # check/clippy can run without building the full frontend.
+      - name: Create frontend dist stub
+        run: mkdir -p dist && echo '<html><body></body></html>' > dist/index.html
+
       - name: Cargo check
         run: cargo check --workspace
 
@@ -98,8 +105,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -115,6 +121,15 @@ jobs:
             libclang-dev \
             cmake
 
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          echo "OPENSSL_DIR=$vcpkgRoot\installed\x64-windows-static-md" >> $env:GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $env:GITHUB_ENV
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -122,7 +137,7 @@ jobs:
           key: ${{ matrix.os }}-build
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Build frontend
         run: npm run build

@@ -28,7 +28,7 @@ import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
 import { SkeletonUtils } from "three-stdlib";
-import { useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { EffectComposer, Bloom, Vignette, SMAA } from "@react-three/postprocessing";
 import type { AgentAppearance, AgentStatus } from "../../types";
@@ -891,7 +891,6 @@ export default function TetsuoAvatar3D({
   // Get initial camera preset from store
   const initialPreset = useAvatarStore((state) => state.currentPreset);
   const isTransitioning = useAvatarStore((state) => state.isTransitioning);
-  const orbitEnabled = useAvatarStore((state) => state.orbitEnabled);
 
   return (
     <div style={{ width: 800, height: 900 }}>
