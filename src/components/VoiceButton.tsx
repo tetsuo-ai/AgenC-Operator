@@ -33,6 +33,7 @@ export default function VoiceButton({
     processing: { color: '#cccccc', label: 'PROCESSING' },
     speaking: { color: '#ffffff', label: 'SPEAKING' },
     error: { color: '#ffffff', label: 'ERROR' },
+    reconnecting: { color: '#ffcc00', label: 'RECONNECTING' },
   };
 
   const config = stateConfig[voiceState];
