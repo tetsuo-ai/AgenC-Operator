@@ -28,6 +28,8 @@ use operator_core::{
     CreateGistParams, CreateGitHubIssueParams, AddGitHubCommentParams, TriggerGitHubWorkflowParams,
     // Auth
     auth::{TwitterOAuth, TwitterTokens},
+    // Database
+    DbTaskStatus, OperatorDb,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -60,6 +62,8 @@ pub struct AppState {
     pub image_executor: Arc<RwLock<Option<ImageExecutor>>>,
     // Phase 4: GitHub executor
     pub github_executor: Arc<RwLock<Option<GitHubExecutor>>>,
+    // Phase 5: Embedded database
+    pub db: Arc<RwLock<Option<OperatorDb>>>,
 }
 
 /// Application configuration
@@ -2723,6 +2727,110 @@ fn frontend_log(level: String, message: String) {
 }
 
 // ============================================================================
+// Database Commands (Phase 5)
+// ============================================================================
+
+#[tauri::command]
+async fn db_list_tasks(
+    state: State<'_, AppState>,
+    status: Option<String>,
+) -> Result<AsyncResult<Vec<serde_json::Value>>, String> {
+    debug!("[IPC] db_list_tasks (status={:?})", status);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let status_filter = status.as_deref().and_then(|s| match s {
+                "claimed" => Some(DbTaskStatus::Claimed),
+                "in_progress" => Some(DbTaskStatus::InProgress),
+                "completed" => Some(DbTaskStatus::Completed),
+                "disputed" => Some(DbTaskStatus::Disputed),
+                "resolved" => Some(DbTaskStatus::Resolved),
+                _ => None,
+            });
+
+            match db.list_tasks(status_filter.as_ref()) {
+                Ok(tasks) => {
+                    let json_tasks: Vec<serde_json::Value> = tasks
+                        .iter()
+                        .map(|t| serde_json::to_value(t).unwrap_or_default())
+                        .collect();
+                    Ok(AsyncResult::ok(json_tasks))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn db_get_task(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_get_task (task_id={})", task_id);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.get_task(&task_id) {
+            Ok(Some(task)) => Ok(AsyncResult::ok(
+                serde_json::to_value(&task).unwrap_or_default(),
+            )),
+            Ok(None) => Ok(AsyncResult::err(format!("Task not found: {}", task_id))),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn db_prune(
+    state: State<'_, AppState>,
+    task_days: Option<i64>,
+    session_days: Option<i64>,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_prune (task_days={:?}, session_days={:?})", task_days, session_days);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let tasks_pruned = db
+                .prune_completed_tasks(task_days.unwrap_or(30))
+                .map_err(|e| e.to_string())?;
+            let sessions_pruned = db
+                .prune_old_sessions(session_days.unwrap_or(90))
+                .map_err(|e| e.to_string())?;
+
+            let result = serde_json::json!({
+                "tasks_pruned": tasks_pruned,
+                "sessions_pruned": sessions_pruned,
+            });
+            Ok(AsyncResult::ok(result))
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn db_stats(
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_stats");
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.stats() {
+            Ok(stats) => Ok(AsyncResult::ok(
+                serde_json::to_value(&stats).unwrap_or_default(),
+            )),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+// ============================================================================
 // Application Setup
 // ============================================================================
 
@@ -2827,6 +2935,29 @@ pub fn run() {
         )
     });
 
+    // Phase 5: Initialize embedded database
+    let operator_db = match OperatorDb::open(None) {
+        Ok(db) => {
+            info!("Embedded database initialized");
+            // Run startup pruning (30 days for completed tasks, 90 days for sessions)
+            match db.prune_completed_tasks(30) {
+                Ok(n) if n > 0 => info!("Startup prune: removed {} old completed tasks", n),
+                Err(e) => warn!("Startup prune failed for tasks: {}", e),
+                _ => {}
+            }
+            match db.prune_old_sessions(90) {
+                Ok(n) if n > 0 => info!("Startup prune: removed {} old sessions", n),
+                Err(e) => warn!("Startup prune failed for sessions: {}", e),
+                _ => {}
+            }
+            Some(db)
+        }
+        Err(e) => {
+            warn!("Failed to initialize database: {} - running without persistence", e);
+            None
+        }
+    };
+
     let state = AppState {
         executor: Arc::new(RwLock::new(executor)),
         policy: Arc::new(RwLock::new(PolicyGate::new())),
@@ -2844,6 +2975,8 @@ pub fn run() {
         image_executor: Arc::new(RwLock::new(image_executor)),
         // Phase 4: GitHub executor
         github_executor: Arc::new(RwLock::new(github_executor)),
+        // Phase 5: Embedded database
+        db: Arc::new(RwLock::new(operator_db)),
     };
 
     tauri::Builder::default()
@@ -2913,6 +3046,11 @@ pub fn run() {
             // Config
             set_rpc_url,
             get_config,
+            // Database (Phase 5)
+            db_list_tasks,
+            db_get_task,
+            db_prune,
+            db_stats,
             // Debug
             frontend_log,
         ])
