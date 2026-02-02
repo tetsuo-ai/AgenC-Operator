@@ -12,7 +12,6 @@ A voice controlled desktop operator for the [AgenC Solana protocol](https://gith
 
 
 [![CI](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml/badge.svg)](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-orange)](https://v2.tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org)
 [![Three.js](https://img.shields.io/badge/Three.js-r170-black?logo=three.js)](https://threejs.org)
