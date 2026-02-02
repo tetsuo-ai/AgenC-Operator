@@ -1,18 +1,21 @@
 # TETSUO - AgenC Operator
 
-> *"I am Tetsuo, your cyberpunk operator for the AgenC protocol. Jacking in..."*
+> *"I am AgenC, your cyberpunk operator for the AgenC protocol. Jacking in..."*
 
-A cyberpunk themed voice controlled desktop operator for the [AgenC Solana protocol](https://github.com/tetsuo-ai/AgenC). Built with Tauri v2 (Rust + React/TypeScript), featuring immersive neon aesthetics, a swappable 2D/3D holographic avatar, and natural voice commands powered by Grok Voice API.
+A voice controlled desktop operator for the [AgenC Solana protocol](https://github.com/tetsuo-ai/AgenC). Built with Tauri v2 (Rust + Three.js), featuring an immersive companion experience, a swappable 2D/3D holographic avatar, and natural voice commands powered by Grok Voice API.
 
 
-<img width="1407" height="665" alt="image" src="https://github.com/user-attachments/assets/c1df306e-2f2e-46a2-9d33-79ff1348cb63" />
+<img width="736" height="559" alt="image" src="https://github.com/user-attachments/assets/a3fe3d4c-b417-4b31-906e-7bf4dc7b106c" />
+
 
 [![CI](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml/badge.svg)](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-orange)](https://v2.tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org)
+[![Three.js](https://img.shields.io/badge/Three.js-r170-black?logo=three.js)](https://threejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript)](https://www.typescriptlang.org)
 [![Solana](https://img.shields.io/badge/Solana-SDK%202.0-purple?logo=solana)](https://solana.com)
+[![redb](https://img.shields.io/badge/redb-2.x-red?logo=rust)](https://github.com/cberner/redb)
 
 ## Features
 
@@ -23,7 +26,6 @@ A cyberpunk themed voice controlled desktop operator for the [AgenC Solana proto
 | **Voice Control** | Natural voice commands for all operations via Grok Voice API |
 | **Swappable Avatar** | Toggle between 2.5D SVG/Canvas and full 3D GLB model rendering |
 | **Customizable Appearance** | Real-time color pickers, effect toggles, and preset system |
-| **Cyberpunk Aesthetics** | Neon glows, glitch effects, scanlines, holographic UI |
 | **Local First Security** | Private keys never leave your device |
 | **Policy Gate** | Spending operations require verbal + typed/hardware confirmation |
 | **Offline Fallback** | Local Whisper ASR when Grok API is unavailable |
@@ -43,10 +45,10 @@ A cyberpunk themed voice controlled desktop operator for the [AgenC Solana proto
 | **Twitter/X** | OAuth connection, post tweets, post threads |
 | **Discord** | Post messages, send embeds to channels |
 | **GitHub** | Create gists, issues, comments, trigger workflows |
-| **Email** | Send single emails, bulk email campaigns (via Resend) |
+| **Email** | Send single emails, bulk email campaigns |
 | **Jupiter** | Token swaps, price quotes, market data |
-| **Grok** | Voice API, code operations, image generation |
-| **Memory** | Conversation history with vector embeddings (Qdrant + OpenAI) |
+| **Grok** | Voice API, code operations, imagine/image generation |
+| **Memory** | Conversation history with vector embeddings (Qdrant + Redb) |
 
 ## Architecture
 
