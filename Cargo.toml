@@ -76,11 +76,5 @@ chrono = { version = "0.4", features = ["serde"] }
 # SPL token for token gating
 spl-associated-token-account = "4.0"
 
-# Embedded database
-redb = "2.4"
-
-# Home directory resolution
-dirs = "5.0"
-
 # CLI parsing
 clap = { version = "4.4", features = ["derive"] }
