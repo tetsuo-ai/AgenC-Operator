@@ -24,6 +24,12 @@ pub mod voice_local;
 // Re-export main types for convenience
 pub use types::*;
 
+// Database
+pub use db::{
+    DbStats, DbTaskStatus, OperatorConfig as DbOperatorConfig, OperatorDb, SessionState,
+    TaskRecord, TranscriptEntry, VerificationLog,
+};
+
 // Solana executor
 pub use solana_exec::SolanaExecutor;
 

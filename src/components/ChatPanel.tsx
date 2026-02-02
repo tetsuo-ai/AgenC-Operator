@@ -42,23 +42,28 @@ export default function ChatPanel({
 
   return (
     <motion.div
-      className="cyber-panel flex flex-col h-full"
-      initial={{ opacity: 0, x: 20 }}
+      className="flex flex-col h-full rounded-lg border border-white/10 relative overflow-hidden"
+      style={{
+        background: 'rgba(10, 10, 10, 0.80)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+      }}
+      initial={{ opacity: 0, x: 40 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.5, delay: 0.2 }}
+      transition={{ duration: 0.5, delay: 0.2, ease: 'easeOut' }}
     >
       {/* Header */}
-      <div className="px-4 py-2 border-b border-neon-magenta/30 bg-gradient-to-r from-neon-magenta/5 to-transparent">
+      <div className="px-4 py-2 border-b border-white/10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <motion.div
-              className="w-2 h-2 rounded-full bg-neon-magenta"
+              className="w-1.5 h-1.5 rounded-full bg-white"
               animate={{
-                opacity: [1, 0.5, 1],
+                opacity: [1, 0.4, 1],
               }}
               transition={{ duration: 2, repeat: Infinity }}
             />
-            <h3 className="font-display text-xs uppercase tracking-widest text-neon-magenta">
+            <h3 className="font-display text-xs uppercase tracking-widest text-white/70">
               OPERATOR FEED
             </h3>
           </div>
@@ -67,7 +72,7 @@ export default function ChatPanel({
           <AnimatePresence>
             {voiceState === 'processing' && (
               <motion.div
-                className="flex items-center gap-1 text-xs text-neon-cyan"
+                className="flex items-center gap-1 text-xs text-white/50"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -104,7 +109,7 @@ export default function ChatPanel({
         <AnimatePresence>
           {voiceState === 'processing' && (
             <motion.div
-              className="flex items-center gap-2 text-holo-silver/40"
+              className="flex items-center gap-2 text-white/30"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -113,7 +118,7 @@ export default function ChatPanel({
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-neon-cyan"
+                    className="w-1.5 h-1.5 rounded-full bg-white/50"
                     animate={{
                       y: [0, -4, 0],
                       opacity: [0.5, 1, 0.5],
@@ -135,7 +140,7 @@ export default function ChatPanel({
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-3 border-t border-neon-magenta/20">
+      <form onSubmit={handleSubmit} className="p-3 border-t border-white/10">
         <div className="flex gap-2">
           <input
             ref={inputRef}
@@ -143,24 +148,18 @@ export default function ChatPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type a command..."
-            className="cyber-input flex-1 text-sm"
+            className="flex-1 text-sm px-3 py-2 font-mono bg-white/5 border border-white/15 rounded text-white outline-none focus:border-white/40 transition-colors placeholder:text-white/25"
             disabled={voiceState === 'processing'}
           />
           <button
             type="submit"
-            className="cyber-btn-magenta px-4 py-2 text-xs"
+            className="px-4 py-2 text-xs font-mono uppercase tracking-wider border border-white/20 rounded text-white/70 hover:text-white hover:border-white/40 hover:bg-white/5 transition-all disabled:opacity-30"
             disabled={!input.trim() || voiceState === 'processing'}
           >
             SEND
           </button>
         </div>
       </form>
-
-      {/* Corner decorations */}
-      <div className="absolute top-0 left-0 w-3 h-3 border-l border-t border-neon-magenta/30" />
-      <div className="absolute top-0 right-0 w-3 h-3 border-r border-t border-neon-magenta/30" />
-      <div className="absolute bottom-0 left-0 w-3 h-3 border-l border-b border-neon-magenta/30" />
-      <div className="absolute bottom-0 right-0 w-3 h-3 border-r border-b border-neon-magenta/30" />
     </motion.div>
   );
 }
@@ -177,22 +176,22 @@ function ChatBubble({ message }: ChatBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
-  // Role-based styling
+  // Role-based styling — monochrome palette
   const bubbleStyles = {
     user: {
       container: 'justify-end',
-      bubble: 'bg-neon-cyan/10 border-neon-cyan/30 text-holo-white',
-      label: 'text-neon-cyan',
+      bubble: 'bg-white/8 border-white/20 text-white/90',
+      label: 'text-white/50',
     },
     tetsuo: {
       container: 'justify-start',
-      bubble: 'bg-neon-magenta/10 border-neon-magenta/30 text-holo-white',
-      label: 'text-neon-magenta',
+      bubble: 'bg-white/5 border-white/15 text-white/85',
+      label: 'text-white/40',
     },
     system: {
       container: 'justify-center',
-      bubble: 'bg-cyber-medium/50 border-holo-silver/20 text-holo-silver/70 text-center',
-      label: 'text-holo-silver/50',
+      bubble: 'bg-white/3 border-white/10 text-white/50 text-center',
+      label: 'text-white/30',
     },
   };
 
@@ -223,15 +222,15 @@ function ChatBubble({ message }: ChatBubbleProps) {
           <Markdown
             components={{
               p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
-              strong: ({ children }) => <strong className="text-neon-cyan font-bold">{children}</strong>,
-              em: ({ children }) => <em className="text-neon-magenta/90 italic">{children}</em>,
+              strong: ({ children }) => <strong className="text-white font-bold">{children}</strong>,
+              em: ({ children }) => <em className="text-white/70 italic">{children}</em>,
               code: ({ children }) => (
-                <code className="bg-cyber-dark/60 border border-holo-silver/20 rounded px-1 py-0.5 text-xs text-neon-green font-mono">
+                <code className="bg-white/5 border border-white/10 rounded px-1 py-0.5 text-xs text-white/80 font-mono">
                   {children}
                 </code>
               ),
               pre: ({ children }) => (
-                <pre className="bg-cyber-dark/80 border border-holo-silver/20 rounded p-2 my-1 overflow-x-auto text-xs">
+                <pre className="bg-white/5 border border-white/10 rounded p-2 my-1 overflow-x-auto text-xs">
                   {children}
                 </pre>
               ),
@@ -240,7 +239,7 @@ function ChatBubble({ message }: ChatBubbleProps) {
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-neon-cyan underline hover:text-neon-cyan/80 transition-colors"
+                  className="text-white/80 underline hover:text-white transition-colors"
                 >
                   {children}
                 </a>
@@ -258,14 +257,14 @@ function ChatBubble({ message }: ChatBubbleProps) {
             <div
               className={`
                 mt-2 pt-2 border-t text-xs
-                ${message.result.success ? 'border-neon-green/30' : 'border-red-500/30'}
+                ${message.result.success ? 'border-white/20' : 'border-red-500/30'}
               `}
             >
-              <span className={message.result.success ? 'text-neon-green' : 'text-red-400'}>
-                {message.result.success ? '✓ Success' : '✗ Failed'}
+              <span className={message.result.success ? 'text-white/70' : 'text-red-400'}>
+                {message.result.success ? 'Success' : 'Failed'}
               </span>
               {message.result.signature && typeof message.result.signature === 'string' && (
-                <div className="mt-1 text-holo-silver/50 truncate">
+                <div className="mt-1 text-white/30 truncate">
                   TX: {message.result.signature.slice(0, 16)}...
                 </div>
               )}

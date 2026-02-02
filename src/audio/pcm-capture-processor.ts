@@ -10,6 +10,16 @@
  * ============================================================================
  */
 
+// AudioWorklet global types (this file runs in a separate AudioWorklet scope)
+declare class AudioWorkletProcessor {
+  readonly port: MessagePort;
+  constructor();
+}
+declare function registerProcessor(
+  name: string,
+  processorCtor: new () => AudioWorkletProcessor
+): void;
+
 const BUFFER_SIZE = 4096;
 
 class PCMCaptureProcessor extends AudioWorkletProcessor {

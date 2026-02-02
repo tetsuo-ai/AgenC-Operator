@@ -17,25 +17,35 @@ import { DEFAULT_QUALITY } from '../config/renderQuality';
 // ============================================================================
 
 export const CAMERA_PRESETS: Record<CameraMode, CameraPreset> = {
+  'face': {
+    position: [0, 162, 35],
+    target: [0, 160, 0],
+    fov: 25,
+  },
+  'bust': {
+    position: [0, 155, 65],
+    target: [0, 150, 0],
+    fov: 30,
+  },
   'closeup': {
     position: [0, 160, 45],
     target: [0, 158, 0],
     fov: 30,
   },
   'waist': {
-    position: [0, 135, 110],
-    target: [0, 130, 0],
-    fov: 35,
+    position: [0, 138, 130],
+    target: [0, 132, 0],
+    fov: 32,
   },
   'full-body': {
-    position: [0, 86, 250],
+    position: [0, 90, 280],
     target: [0, 86, 0],
-    fov: 40,
+    fov: 35,
   },
   'presentation': {
-    position: [30, 140, 90],
-    target: [0, 135, 0],
-    fov: 35,
+    position: [40, 142, 100],
+    target: [0, 136, 0],
+    fov: 32,
   },
   'custom': {
     position: [0, 135, 110],

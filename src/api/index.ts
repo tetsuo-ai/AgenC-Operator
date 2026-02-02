@@ -22,6 +22,10 @@ import type {
   Memory,
   UserContext,
   Feature,
+  TaskRecord,
+  SessionState,
+  DbStats,
+  DbPruneResult,
 } from '../types';
 
 // ============================================================================
@@ -1066,32 +1070,85 @@ export const TaskAPI = {
 };
 
 // ============================================================================
-// Database API (Local Persistence - Phase 5)
+// Database API (redb persistence)
 // ============================================================================
 
 export const DatabaseAPI = {
   /**
-   * List tasks from the local database
-   * @param status - Optional filter: "claimed" | "in_progress" | "completed" | "disputed" | "resolved"
+   * List task records from the embedded database
+   * @param status - Optional filter by DbTaskStatus
    */
-  listLocalTasks(status?: string): Promise<unknown[]> {
-    return invoke<AsyncResult<unknown[]>>('db_list_tasks', { status })
+  listTasks(status?: string): Promise<TaskRecord[]> {
+    return invoke<AsyncResult<TaskRecord[]>>('db_list_tasks', { status })
       .then(unwrapResult)
       .catch((err) => {
-        console.error('[API] dbListTasks failed:', err);
+        console.error('[API] db_list_tasks failed:', err);
         return [];
       });
   },
 
   /**
-   * Get a specific task from the local database
+   * Get a specific task record by ID
    */
-  getLocalTask(taskId: string): Promise<unknown | null> {
-    return invoke<AsyncResult<unknown>>('db_get_task', { taskId })
+  getTask(taskId: string): Promise<TaskRecord> {
+    return invoke<AsyncResult<TaskRecord>>('db_get_task', { taskId })
       .then(unwrapResult)
       .catch((err) => {
-        console.error('[API] dbGetTask failed:', err);
-        return null;
+        console.error('[API] db_get_task failed:', err);
+        throw new TetsuoAPIError(`Task not found: ${err}`);
+      });
+  },
+
+  /**
+   * Get a session by ID
+   */
+  getSession(sessionId: string): Promise<SessionState> {
+    return invoke<AsyncResult<SessionState>>('db_get_session', { sessionId })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] db_get_session failed:', err);
+        throw new TetsuoAPIError(`Session not found: ${err}`);
+      });
+  },
+
+  /**
+   * Get the current session ID
+   */
+  getCurrentSessionId(): Promise<string> {
+    return invoke<AsyncResult<string>>('db_get_current_session')
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] db_get_current_session failed:', err);
+        throw new TetsuoAPIError(`Failed to get session ID: ${err}`);
+      });
+  },
+
+  /**
+   * Prune old completed tasks and sessions
+   * @param taskDays - Remove completed tasks older than N days (default: 30)
+   * @param sessionDays - Remove sessions older than N days (default: 90)
+   */
+  prune(taskDays?: number, sessionDays?: number): Promise<DbPruneResult> {
+    return invoke<AsyncResult<DbPruneResult>>('db_prune', {
+      task_days: taskDays,
+      session_days: sessionDays,
+    })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] db_prune failed:', err);
+        throw new TetsuoAPIError(`Prune failed: ${err}`);
+      });
+  },
+
+  /**
+   * Get database statistics
+   */
+  stats(): Promise<DbStats> {
+    return invoke<AsyncResult<DbStats>>('db_stats')
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] db_stats failed:', err);
+        throw new TetsuoAPIError(`Stats failed: ${err}`);
       });
   },
 };
@@ -1118,7 +1175,7 @@ export const TetsuoAPI = {
   image: ImageAPI,
   // Phase 4 APIs
   github: GitHubAPI,
-  // Phase 5 APIs
+  // Phase 5: Database
   database: DatabaseAPI,
 };
 

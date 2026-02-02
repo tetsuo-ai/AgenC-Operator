@@ -44,6 +44,7 @@ struct EmbeddingData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct EmbeddingUsage {
     prompt_tokens: u32,
     total_tokens: u32,
@@ -55,6 +56,7 @@ struct ErrorResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ErrorDetail {
     message: String,
     #[serde(rename = "type")]

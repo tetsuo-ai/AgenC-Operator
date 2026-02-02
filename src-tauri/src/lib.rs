@@ -9,18 +9,17 @@
 
 use operator_core::{
     AgencTask, ExecutionResult, IntentAction, PolicyCheck, PolicyGate, ProtocolState, SolanaExecutor,
-    VoiceIntent, VoiceState, WalletInfo,
+    VoiceIntent, VoiceState, WalletInfo, TaskStatus,
     // Access control
-    AccessGate, AccessTier, AccessTierInfo, Feature,
+    AccessGate, AccessTierInfo, Feature,
     // Memory system
-    ConversationTurn, EmbeddingService, Memory, MemoryManager, MemoryType, UserContext,
+    Memory, MemoryManager, MemoryType, UserContext,
     // Executors
     DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
     JupiterSwapExecutor, TwitterExecutor,
     // Types for executors
     SwapParams, SwapQuote, TokenPrice, TweetResult,
     DiscordResult, EmailResult, BulkEmailResult, ImageGenResult,
-    GistResult, IssueResult, CommentResult, WorkflowResult,
     // Param types for intent routing
     CodeFixParams, CodeReviewParams, CodeGenerateParams, CodeExplainParams,
     TweetParams, ThreadParams, DiscordMessageParams, DiscordEmbedParams,
@@ -29,7 +28,8 @@ use operator_core::{
     // Auth
     auth::{TwitterOAuth, TwitterTokens},
     // Database
-    OperatorDb, TaskRecord, DbTaskStatus,
+    DbTaskStatus, DbOperatorConfig, OperatorDb, TaskRecord, SessionState, TranscriptEntry,
+    VerificationLog,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -64,6 +64,8 @@ pub struct AppState {
     pub github_executor: Arc<RwLock<Option<GitHubExecutor>>>,
     // Phase 5: Embedded database
     pub db: Arc<RwLock<Option<OperatorDb>>>,
+    // Session tracking
+    pub session_id: String,
 }
 
 /// Application configuration
@@ -136,6 +138,134 @@ impl<T> AsyncResult<T> {
 }
 
 // ============================================================================
+// Database Persistence Helpers (non-fatal - warn and continue on error)
+// ============================================================================
+
+/// Convert an AgencTask (chain-side) to a TaskRecord (DB-side)
+fn agenc_task_to_record(task: &AgencTask) -> TaskRecord {
+    let db_status = match task.status {
+        TaskStatus::Open | TaskStatus::Claimed => DbTaskStatus::Claimed,
+        TaskStatus::Completed => DbTaskStatus::Completed,
+        TaskStatus::Cancelled => DbTaskStatus::Resolved,
+        TaskStatus::Disputed => DbTaskStatus::Disputed,
+    };
+
+    let completed_at = if matches!(task.status, TaskStatus::Completed) {
+        Some(chrono::Utc::now().timestamp())
+    } else {
+        None
+    };
+
+    TaskRecord {
+        task_id: task.id.clone(),
+        payload: serde_json::to_vec(task).unwrap_or_default(),
+        status: db_status,
+        claimed_at: chrono::Utc::now().timestamp(),
+        completed_at,
+        on_chain_signature: None,
+        description: Some(task.description.clone()),
+        reward_lamports: Some(task.reward_lamports),
+        creator: Some(task.creator.clone()),
+    }
+}
+
+/// Persist task result to DB if the action is task-related (non-fatal)
+async fn persist_task_to_db(
+    db: &RwLock<Option<OperatorDb>>,
+    result: &ExecutionResult,
+    action: &IntentAction,
+) {
+    if !matches!(
+        action,
+        IntentAction::CreateTask
+            | IntentAction::ClaimTask
+            | IntentAction::CompleteTask
+            | IntentAction::CancelTask
+    ) {
+        return;
+    }
+
+    // Extract AgencTask from result.data
+    let task: Option<AgencTask> = result
+        .data
+        .as_ref()
+        .and_then(|d| serde_json::from_value(d.clone()).ok());
+
+    if let Some(task) = task {
+        let mut record = agenc_task_to_record(&task);
+        record.on_chain_signature = result.signature.clone();
+
+        let guard = db.read().await;
+        if let Some(db) = guard.as_ref() {
+            if let Err(e) = db.store_task(&record) {
+                warn!("[DB] Failed to persist task {}: {}", record.task_id, e);
+            } else {
+                debug!("[DB] Persisted task {} (status={:?})", record.task_id, record.status);
+            }
+
+            // For completed tasks, also store a verification proof
+            if matches!(action, IntentAction::CompleteTask) {
+                let proof = VerificationLog {
+                    task_id: task.id.clone(),
+                    inputs: vec![],
+                    outputs: serde_json::to_vec(&result).unwrap_or_default(),
+                    proof_hash: format!("completed_{}", chrono::Utc::now().timestamp()),
+                    timestamp: chrono::Utc::now().timestamp(),
+                    submitted: result.signature.is_some(),
+                    submission_signature: result.signature.clone(),
+                };
+                if let Err(e) = db.store_proof(&proof) {
+                    warn!("[DB] Failed to persist proof for task {}: {}", task.id, e);
+                }
+            }
+        }
+    }
+}
+
+/// Update session tracking in DB (non-fatal)
+async fn update_session_db(
+    db: &RwLock<Option<OperatorDb>>,
+    session_id: &str,
+    action: &IntentAction,
+    task_id: Option<&str>,
+) {
+    let guard = db.read().await;
+    if let Some(db) = guard.as_ref() {
+        // Get existing session or create new one
+        let mut session = match db.get_session(session_id) {
+            Ok(Some(s)) => s,
+            _ => SessionState {
+                session_id: session_id.to_string(),
+                transcript: vec![],
+                active_task_ids: vec![],
+                command_history: vec![],
+                created_at: chrono::Utc::now().timestamp(),
+                last_active: chrono::Utc::now().timestamp(),
+            },
+        };
+
+        let action_str = format!("{:?}", action);
+        session.command_history.push(action_str.clone());
+        session.transcript.push(TranscriptEntry {
+            role: "system".to_string(),
+            content: action_str,
+            timestamp: chrono::Utc::now().timestamp(),
+        });
+        session.last_active = chrono::Utc::now().timestamp();
+
+        if let Some(tid) = task_id {
+            if !session.active_task_ids.contains(&tid.to_string()) {
+                session.active_task_ids.push(tid.to_string());
+            }
+        }
+
+        if let Err(e) = db.store_session(&session) {
+            warn!("[DB] Failed to update session {}: {}", session_id, e);
+        }
+    }
+}
+
+// ============================================================================
 // Tauri Commands - Wallet Operations (Non-Blocking)
 // ============================================================================
 
@@ -162,6 +292,30 @@ async fn load_wallet(
     match handle.await {
         Ok(Ok(address)) => {
             info!("[IPC] Wallet loaded: {}", address);
+
+            // Persist config to DB (non-fatal)
+            {
+                let config_guard = state.config.read().await;
+                let db_guard = state.db.read().await;
+                if let Some(db) = db_guard.as_ref() {
+                    let db_config = DbOperatorConfig {
+                        wallet_pubkey: Some(address.clone()),
+                        rpc_url: config_guard.rpc_url.clone(),
+                        network: config_guard.network.clone(),
+                        capabilities: vec![
+                            "voice".into(), "code".into(), "trading".into(),
+                            "social".into(), "email".into(), "image".into(),
+                        ],
+                        model_preferences: None,
+                    };
+                    if let Err(e) = db.store_config(&db_config) {
+                        warn!("[DB] Failed to persist config: {}", e);
+                    } else {
+                        debug!("[DB] Persisted operator config (wallet={})", address);
+                    }
+                }
+            }
+
             Ok(AsyncResult::ok(address))
         }
         Ok(Err(e)) => {
@@ -368,7 +522,16 @@ async fn execute_confirmed(
     });
 
     match handle.await {
-        Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
+        Ok(Ok(result)) => {
+            // Persist to DB if applicable (non-fatal)
+            if result.success {
+                let task_id = intent.params.get("task_id").and_then(|v| v.as_str());
+                persist_task_to_db(&state.db, &result, &intent.action).await;
+                update_session_db(&state.db, &state.session_id, &intent.action, task_id).await;
+            }
+
+            Ok(AsyncResult::ok(result))
+        }
         Ok(Err(e)) => Ok(AsyncResult::err(e.to_string())),
         Err(e) => Ok(AsyncResult::err(format!("Task failed: {}", e))),
     }
@@ -1328,61 +1491,26 @@ async fn route_solana(
     intent: &VoiceIntent,
 ) -> Result<AsyncResult<ExecutionResult>, String> {
     let executor = Arc::clone(&state.executor);
-    let db = Arc::clone(&state.db);
     let intent_clone = intent.clone();
-    let action = intent.action.clone();
 
     // Spawn the chain operation - this is the slow part
     let handle = tokio::spawn(async move {
         debug!("[SPAWN] Executing intent on chain...");
         let exec = executor.read().await;
-        let result = exec.execute_intent(&intent_clone).await?;
-
-        // Wire database persistence for task operations
-        if result.success {
-            let db_guard = db.read().await;
-            if let Some(db) = db_guard.as_ref() {
-                match &action {
-                    IntentAction::ClaimTask => {
-                        if let Ok(params) = serde_json::from_value::<operator_core::ClaimTaskParams>(intent_clone.params.clone()) {
-                            let task_record = TaskRecord {
-                                task_id: params.task_id.clone(),
-                                payload: serde_json::to_vec(&intent_clone.params).unwrap_or_default(),
-                                status: DbTaskStatus::Claimed,
-                                claimed_at: chrono::Utc::now().timestamp(),
-                                completed_at: None,
-                                on_chain_signature: result.signature.clone(),
-                                description: None,
-                                reward_lamports: None,
-                                creator: None,
-                            };
-                            if let Err(e) = db.store_task(&task_record) {
-                                warn!("Failed to store claimed task in DB: {}", e);
-                            } else {
-                                info!("Task {} stored in local database", params.task_id);
-                            }
-                        }
-                    }
-                    IntentAction::CompleteTask => {
-                        if let Ok(params) = serde_json::from_value::<operator_core::CompleteTaskParams>(intent_clone.params.clone()) {
-                            if let Err(e) = db.update_task_status(&params.task_id, DbTaskStatus::Completed) {
-                                warn!("Failed to update task status in DB: {}", e);
-                            } else {
-                                info!("Task {} marked completed in local database", params.task_id);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Ok::<_, anyhow::Error>(result)
+        exec.execute_intent(&intent_clone).await
     });
 
     match handle.await {
         Ok(Ok(result)) => {
             info!("[IPC] Intent executed: success={}", result.success);
+
+            // Persist to DB if applicable (non-fatal)
+            if result.success {
+                let task_id = intent.params.get("task_id").and_then(|v| v.as_str());
+                persist_task_to_db(&state.db, &result, &intent.action).await;
+                update_session_db(&state.db, &state.session_id, &intent.action, task_id).await;
+            }
+
             Ok(AsyncResult::ok(result))
         }
         Ok(Err(e)) => {
@@ -2773,7 +2901,6 @@ fn frontend_log(level: String, message: String) {
 // Database Commands (Phase 5)
 // ============================================================================
 
-/// List tasks from the local database
 #[tauri::command]
 async fn db_list_tasks(
     state: State<'_, AppState>,
@@ -2808,13 +2935,12 @@ async fn db_list_tasks(
     }
 }
 
-/// Get a specific task from the local database
 #[tauri::command]
 async fn db_get_task(
     state: State<'_, AppState>,
     task_id: String,
 ) -> Result<AsyncResult<serde_json::Value>, String> {
-    debug!("[IPC] db_get_task: {}", task_id);
+    debug!("[IPC] db_get_task (task_id={})", task_id);
 
     let db = state.db.read().await;
     match db.as_ref() {
@@ -2827,6 +2953,79 @@ async fn db_get_task(
         },
         None => Ok(AsyncResult::err("Database not initialized".to_string())),
     }
+}
+
+#[tauri::command]
+async fn db_prune(
+    state: State<'_, AppState>,
+    task_days: Option<i64>,
+    session_days: Option<i64>,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_prune (task_days={:?}, session_days={:?})", task_days, session_days);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let tasks_pruned = db
+                .prune_completed_tasks(task_days.unwrap_or(30))
+                .map_err(|e| e.to_string())?;
+            let sessions_pruned = db
+                .prune_old_sessions(session_days.unwrap_or(90))
+                .map_err(|e| e.to_string())?;
+
+            let result = serde_json::json!({
+                "tasks_pruned": tasks_pruned,
+                "sessions_pruned": sessions_pruned,
+            });
+            Ok(AsyncResult::ok(result))
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn db_stats(
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_stats");
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.stats() {
+            Ok(stats) => Ok(AsyncResult::ok(
+                serde_json::to_value(&stats).unwrap_or_default(),
+            )),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn db_get_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] db_get_session (session_id={})", session_id);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.get_session(&session_id) {
+            Ok(Some(session)) => Ok(AsyncResult::ok(
+                serde_json::to_value(&session).unwrap_or_default(),
+            )),
+            Ok(None) => Ok(AsyncResult::err(format!("Session not found: {}", session_id))),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn db_get_current_session(
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<String>, String> {
+    Ok(AsyncResult::ok(state.session_id.clone()))
 }
 
 // ============================================================================
@@ -2937,22 +3136,40 @@ pub fn run() {
     // Phase 5: Initialize embedded database
     let operator_db = match OperatorDb::open(None) {
         Ok(db) => {
-            info!("Operator database initialized at: {}", db.path().display());
-            match db.list_tasks(Some(&DbTaskStatus::Claimed)) {
-                Ok(pending) => {
-                    if !pending.is_empty() {
-                        info!("Loaded {} pending tasks from database", pending.len());
-                    }
+            info!("Embedded database initialized");
+            // Run startup pruning (30 days for completed tasks, 90 days for sessions)
+            match db.prune_completed_tasks(30) {
+                Ok(n) if n > 0 => info!("Startup prune: removed {} old completed tasks", n),
+                Err(e) => warn!("Startup prune failed for tasks: {}", e),
+                _ => {}
+            }
+            match db.prune_old_sessions(90) {
+                Ok(n) if n > 0 => info!("Startup prune: removed {} old sessions", n),
+                Err(e) => warn!("Startup prune failed for sessions: {}", e),
+                _ => {}
+            }
+            // Load saved config if available
+            match db.get_config() {
+                Ok(Some(saved_config)) => {
+                    info!(
+                        "Loaded saved config: wallet={:?}, network={}",
+                        saved_config.wallet_pubkey, saved_config.network
+                    );
                 }
-                Err(e) => warn!("Failed to load pending tasks: {}", e),
+                Ok(None) => debug!("No saved config found"),
+                Err(e) => warn!("Failed to load saved config: {}", e),
             }
             Some(db)
         }
         Err(e) => {
-            warn!("Failed to init operator database: {} - running without persistence", e);
+            warn!("Failed to initialize database: {} - running without persistence", e);
             None
         }
     };
+
+    // Generate session ID for this app run
+    let session_id = format!("session_{}", chrono::Utc::now().timestamp_millis());
+    info!("Session ID: {}", session_id);
 
     let state = AppState {
         executor: Arc::new(RwLock::new(executor)),
@@ -2973,12 +3190,14 @@ pub fn run() {
         github_executor: Arc::new(RwLock::new(github_executor)),
         // Phase 5: Embedded database
         db: Arc::new(RwLock::new(operator_db)),
+        // Session tracking
+        session_id,
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        // TODO: Generate signing keypair and set pubkey in tauri.conf.json before release
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // NOTE: Updater disabled until plugins.updater is configured in tauri.conf.json
+        // .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             // Wallet (async spawned)
@@ -3045,6 +3264,10 @@ pub fn run() {
             // Database (Phase 5)
             db_list_tasks,
             db_get_task,
+            db_prune,
+            db_stats,
+            db_get_session,
+            db_get_current_session,
             // Debug
             frontend_log,
         ])

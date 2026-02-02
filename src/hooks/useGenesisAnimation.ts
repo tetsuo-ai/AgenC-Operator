@@ -16,6 +16,7 @@ import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { log } from '../utils/log';
 import { MODEL_CONFIG } from '../config/modelConfig';
+import { POSE_PRESETS } from '../config/posePresets';
 
 // ============================================================================
 // Configuration
@@ -281,6 +282,34 @@ export function useGenesisAnimation(
       }
     } else {
       log.warn('[GenesisAnimation] Upper arm bones not found - cannot check arm pose');
+    }
+
+    // ========================================================================
+    // IDLE POSE: Apply relaxed contrapposto offsets from posePresets
+    // ========================================================================
+    // Adds subtle rotation offsets for a natural standing pose.
+    // Re-captures as new rest poses so downstream hooks inherit the relaxed base.
+    // ========================================================================
+
+    const idlePose = POSE_PRESETS.idle;
+    if (Object.keys(idlePose.bones).length > 0) {
+      log.info('[GenesisAnimation] Applying idle pose offsets...');
+      let appliedCount = 0;
+
+      for (const [boneName, offsets] of Object.entries(idlePose.bones)) {
+        const bone = bones[boneName as keyof BoneRefs];
+        if (!bone || !offsets) continue;
+
+        if (offsets.x) bone.rotation.x += offsets.x;
+        if (offsets.y) bone.rotation.y += offsets.y;
+        if (offsets.z) bone.rotation.z += offsets.z;
+
+        // Re-capture as new rest pose
+        restPosesRef.current[boneName] = bone.rotation.clone();
+        appliedCount++;
+      }
+
+      log.info(`[GenesisAnimation] Idle pose applied to ${appliedCount} bones`);
     }
 
     // ========================================================================

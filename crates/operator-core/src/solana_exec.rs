@@ -15,13 +15,11 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_instruction,
-    transaction::Transaction,
 };
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::info;
 
 use crate::types::*;
 
@@ -32,9 +30,9 @@ pub struct SolanaExecutor {
     /// Local keypair for signing (NEVER leaves device)
     keypair: Arc<RwLock<Option<Keypair>>>,
     /// Network (mainnet-beta, devnet, testnet)
-    network: String,
+    _network: String,
     /// AgenC program ID (set this to your deployed program)
-    program_id: Pubkey,
+    _program_id: Pubkey,
 }
 
 impl SolanaExecutor {
@@ -52,8 +50,8 @@ impl SolanaExecutor {
                 CommitmentConfig::confirmed(),
             ),
             keypair: Arc::new(RwLock::new(None)),
-            network: network.to_string(),
-            program_id,
+            _network: network.to_string(),
+            _program_id: program_id,
         }
     }
 
@@ -67,7 +65,7 @@ impl SolanaExecutor {
         let bytes: Vec<u8> = serde_json::from_str(&keypair_data)
             .map_err(|e| anyhow!("Failed to parse keypair: {}", e))?;
 
-        let keypair = Keypair::from_bytes(&bytes)
+        let keypair = Keypair::try_from(bytes.as_slice())
             .map_err(|e| anyhow!("Invalid keypair bytes: {}", e))?;
 
         let address = keypair.pubkey().to_string();
@@ -276,7 +274,7 @@ impl SolanaExecutor {
 
         // Verify wallet
         let keypair_guard = self.keypair.read().await;
-        let keypair = keypair_guard.as_ref()
+        let _keypair = keypair_guard.as_ref()
             .ok_or_else(|| anyhow!("Wallet not connected"))?;
 
         // TODO: Fetch task from chain and verify it's open

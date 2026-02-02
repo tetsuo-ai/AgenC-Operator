@@ -1,92 +1,69 @@
-//! ============================================================================
-//! Operator Database - Embedded State Storage (redb)
-//! ============================================================================
-//! Persistent local storage for task cache, session state, verification logs,
-//! and operator config. Single-file redb database at ~/.agenc/operator.redb.
-//! ============================================================================
+// ============================================================================
+// OperatorDb — Embedded Database (redb)
+// ============================================================================
+// Persistent local storage for tasks, sessions, proofs, and config.
+// Default path: ~/.agenc/operator.redb (override via AGENC_DB_PATH env var)
+// ============================================================================
 
 pub mod types;
 
-use anyhow::{anyhow, Result};
-use redb::{Database, ReadableTable, TableDefinition};
-use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
-
 pub use types::{
-    DbTaskStatus, OperatorConfig, SessionState, TaskRecord, TranscriptEntry, VerificationLog,
+    DbStats, DbTaskStatus, OperatorConfig, SessionState, TaskRecord, TranscriptEntry,
+    VerificationLog,
 };
 
-// ============================================================================
-// Table Definitions
-// ============================================================================
+use anyhow::{anyhow, Result};
+use redb::{Database, TableDefinition};
+use std::path::{Path, PathBuf};
+use tracing::{debug, info};
 
+// Table definitions
 const TASKS: TableDefinition<&str, &[u8]> = TableDefinition::new("tasks");
 const SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("sessions");
 const PROOFS: TableDefinition<&str, &[u8]> = TableDefinition::new("proofs");
 const CONFIG: TableDefinition<&str, &[u8]> = TableDefinition::new("config");
 
-// ============================================================================
-// OperatorDb
-// ============================================================================
-
+/// Embedded database for the AgenC operator
 pub struct OperatorDb {
     db: Database,
     path: PathBuf,
 }
 
 impl OperatorDb {
-    /// Open or create the database at the given path.
-    /// Default path: ~/.agenc/operator.redb
-    /// Override via AGENC_DB_PATH env var.
+    /// Open (or create) the database at the given path.
+    /// If `path` is None, uses AGENC_DB_PATH env var or ~/.agenc/operator.redb
     pub fn open(path: Option<&str>) -> Result<Self> {
-        let db_path = match path {
-            Some(p) => PathBuf::from(p),
-            None => {
-                let env_path = std::env::var("AGENC_DB_PATH").ok();
-                match env_path {
-                    Some(p) => PathBuf::from(p),
-                    None => {
-                        let home = dirs::home_dir()
-                            .ok_or_else(|| anyhow!("Cannot determine home directory"))?;
-                        home.join(".agenc").join("operator.redb")
-                    }
-                }
-            }
+        let db_path = if let Some(p) = path {
+            PathBuf::from(p)
+        } else if let Ok(env_path) = std::env::var("AGENC_DB_PATH") {
+            PathBuf::from(env_path)
+        } else {
+            let home = dirs::home_dir().ok_or_else(|| anyhow!("Cannot determine home directory"))?;
+            let agenc_dir = home.join(".agenc");
+            std::fs::create_dir_all(&agenc_dir)
+                .map_err(|e| anyhow!("Failed to create .agenc directory: {}", e))?;
+            agenc_dir.join("operator.redb")
         };
 
-        // Ensure parent directory exists
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| anyhow!("Failed to create database directory: {}", e))?;
-        }
+        info!("Opening database at: {}", db_path.display());
 
-        info!("Opening operator database at: {}", db_path.display());
         let db = Database::create(&db_path)
             .map_err(|e| anyhow!("Failed to open database: {}", e))?;
 
-        // Initialize tables by opening a write transaction
+        // Ensure tables exist by doing a write transaction
         let write_txn = db
             .begin_write()
-            .map_err(|e| anyhow!("Failed to begin write txn: {}", e))?;
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
         {
-            let _ = write_txn
-                .open_table(TASKS)
-                .map_err(|e| anyhow!("Failed to init tasks table: {}", e))?;
-            let _ = write_txn
-                .open_table(SESSIONS)
-                .map_err(|e| anyhow!("Failed to init sessions table: {}", e))?;
-            let _ = write_txn
-                .open_table(PROOFS)
-                .map_err(|e| anyhow!("Failed to init proofs table: {}", e))?;
-            let _ = write_txn
-                .open_table(CONFIG)
-                .map_err(|e| anyhow!("Failed to init config table: {}", e))?;
+            let _ = write_txn.open_table(TASKS).map_err(|e| anyhow!("Failed to create tasks table: {}", e))?;
+            let _ = write_txn.open_table(SESSIONS).map_err(|e| anyhow!("Failed to create sessions table: {}", e))?;
+            let _ = write_txn.open_table(PROOFS).map_err(|e| anyhow!("Failed to create proofs table: {}", e))?;
+            let _ = write_txn.open_table(CONFIG).map_err(|e| anyhow!("Failed to create config table: {}", e))?;
         }
-        write_txn
-            .commit()
-            .map_err(|e| anyhow!("Failed to commit table init: {}", e))?;
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit init: {}", e))?;
 
-        info!("Operator database initialized successfully");
+        info!("Database ready");
+
         Ok(Self { db, path: db_path })
     }
 
@@ -99,48 +76,34 @@ impl OperatorDb {
     // Task Operations
     // ========================================================================
 
-    /// Store or update a task record
     pub fn store_task(&self, task: &TaskRecord) -> Result<()> {
         let key = format!("tasks:{}", task.task_id);
         let value = bincode::serialize(task)
             .map_err(|e| anyhow!("Failed to serialize task: {}", e))?;
 
-        let write_txn = self
-            .db
-            .begin_write()
+        let write_txn = self.db.begin_write()
             .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
         {
-            let mut table = write_txn
-                .open_table(TASKS)
+            let mut table = write_txn.open_table(TASKS)
                 .map_err(|e| anyhow!("Failed to open tasks table: {}", e))?;
-            table
-                .insert(key.as_str(), value.as_slice())
+            table.insert(key.as_str(), value.as_slice())
                 .map_err(|e| anyhow!("Failed to insert task: {}", e))?;
         }
-        write_txn
-            .commit()
-            .map_err(|e| anyhow!("Failed to commit task: {}", e))?;
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
 
         debug!("Stored task: {}", task.task_id);
         Ok(())
     }
 
-    /// Get a task by ID
     pub fn get_task(&self, task_id: &str) -> Result<Option<TaskRecord>> {
         let key = format!("tasks:{}", task_id);
 
-        let read_txn = self
-            .db
-            .begin_read()
+        let read_txn = self.db.begin_read()
             .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
-        let table = read_txn
-            .open_table(TASKS)
+        let table = read_txn.open_table(TASKS)
             .map_err(|e| anyhow!("Failed to open tasks table: {}", e))?;
 
-        match table
-            .get(key.as_str())
-            .map_err(|e| anyhow!("Failed to get task: {}", e))?
-        {
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get task: {}", e))? {
             Some(value) => {
                 let task: TaskRecord = bincode::deserialize(value.value())
                     .map_err(|e| anyhow!("Failed to deserialize task: {}", e))?;
@@ -150,27 +113,22 @@ impl OperatorDb {
         }
     }
 
-    /// List all tasks, optionally filtered by status
     pub fn list_tasks(&self, status_filter: Option<&DbTaskStatus>) -> Result<Vec<TaskRecord>> {
-        let read_txn = self
-            .db
-            .begin_read()
+        let read_txn = self.db.begin_read()
             .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
-        let table = read_txn
-            .open_table(TASKS)
+        let table = read_txn.open_table(TASKS)
             .map_err(|e| anyhow!("Failed to open tasks table: {}", e))?;
 
         let mut results = Vec::new();
-        for entry in table
-            .iter()
-            .map_err(|e| anyhow!("Failed to iterate tasks: {}", e))?
-        {
-            let (_key, value) =
-                entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
+        let iter = table.range::<&str>(..)
+            .map_err(|e| anyhow!("Failed to iterate tasks: {}", e))?;
+        for entry in iter {
+            let (_key, value) = entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
             let task: TaskRecord = bincode::deserialize(value.value())
                 .map_err(|e| anyhow!("Failed to deserialize task: {}", e))?;
+
             if let Some(filter) = status_filter {
-                if task.status == *filter {
+                if &task.status == filter {
                     results.push(task);
                 }
             } else {
@@ -180,62 +138,53 @@ impl OperatorDb {
         Ok(results)
     }
 
-    /// Update a task's status
     pub fn update_task_status(&self, task_id: &str, status: DbTaskStatus) -> Result<()> {
         let mut task = self
             .get_task(task_id)?
             .ok_or_else(|| anyhow!("Task not found: {}", task_id))?;
-        task.status = status;
-        if matches!(task.status, DbTaskStatus::Completed) {
+
+        task.status = status.clone();
+        if status == DbTaskStatus::Completed {
             task.completed_at = Some(chrono::Utc::now().timestamp());
         }
-        self.store_task(&task)
+
+        self.store_task(&task)?;
+        debug!("Updated task {} status to {:?}", task_id, status);
+        Ok(())
     }
 
     // ========================================================================
     // Session Operations
     // ========================================================================
 
-    /// Store session state
     pub fn store_session(&self, session: &SessionState) -> Result<()> {
         let key = format!("sessions:{}", session.session_id);
         let value = bincode::serialize(session)
             .map_err(|e| anyhow!("Failed to serialize session: {}", e))?;
 
-        let write_txn = self
-            .db
-            .begin_write()
+        let write_txn = self.db.begin_write()
             .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
         {
-            let mut table = write_txn
-                .open_table(SESSIONS)
+            let mut table = write_txn.open_table(SESSIONS)
                 .map_err(|e| anyhow!("Failed to open sessions table: {}", e))?;
-            table
-                .insert(key.as_str(), value.as_slice())
+            table.insert(key.as_str(), value.as_slice())
                 .map_err(|e| anyhow!("Failed to insert session: {}", e))?;
         }
-        write_txn
-            .commit()
-            .map_err(|e| anyhow!("Failed to commit session: {}", e))?;
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored session: {}", session.session_id);
         Ok(())
     }
 
-    /// Get session state
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionState>> {
         let key = format!("sessions:{}", session_id);
 
-        let read_txn = self
-            .db
-            .begin_read()
+        let read_txn = self.db.begin_read()
             .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
-        let table = read_txn
-            .open_table(SESSIONS)
+        let table = read_txn.open_table(SESSIONS)
             .map_err(|e| anyhow!("Failed to open sessions table: {}", e))?;
 
-        match table
-            .get(key.as_str())
-            .map_err(|e| anyhow!("Failed to get session: {}", e))?
-        {
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get session: {}", e))? {
             Some(value) => {
                 let session: SessionState = bincode::deserialize(value.value())
                     .map_err(|e| anyhow!("Failed to deserialize session: {}", e))?;
@@ -245,50 +194,56 @@ impl OperatorDb {
         }
     }
 
+    pub fn list_sessions(&self) -> Result<Vec<SessionState>> {
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(SESSIONS)
+            .map_err(|e| anyhow!("Failed to open sessions table: {}", e))?;
+
+        let mut results = Vec::new();
+        let iter = table.range::<&str>(..)
+            .map_err(|e| anyhow!("Failed to iterate sessions: {}", e))?;
+        for entry in iter {
+            let (_key, value) = entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
+            let session: SessionState = bincode::deserialize(value.value())
+                .map_err(|e| anyhow!("Failed to deserialize session: {}", e))?;
+            results.push(session);
+        }
+        Ok(results)
+    }
+
     // ========================================================================
     // Proof Operations
     // ========================================================================
 
-    /// Store a verification log
     pub fn store_proof(&self, proof: &VerificationLog) -> Result<()> {
         let key = format!("proofs:{}", proof.task_id);
         let value = bincode::serialize(proof)
             .map_err(|e| anyhow!("Failed to serialize proof: {}", e))?;
 
-        let write_txn = self
-            .db
-            .begin_write()
+        let write_txn = self.db.begin_write()
             .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
         {
-            let mut table = write_txn
-                .open_table(PROOFS)
+            let mut table = write_txn.open_table(PROOFS)
                 .map_err(|e| anyhow!("Failed to open proofs table: {}", e))?;
-            table
-                .insert(key.as_str(), value.as_slice())
+            table.insert(key.as_str(), value.as_slice())
                 .map_err(|e| anyhow!("Failed to insert proof: {}", e))?;
         }
-        write_txn
-            .commit()
-            .map_err(|e| anyhow!("Failed to commit proof: {}", e))?;
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored proof for task: {}", proof.task_id);
         Ok(())
     }
 
-    /// Get a verification log for a task
     pub fn get_proof(&self, task_id: &str) -> Result<Option<VerificationLog>> {
         let key = format!("proofs:{}", task_id);
 
-        let read_txn = self
-            .db
-            .begin_read()
+        let read_txn = self.db.begin_read()
             .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
-        let table = read_txn
-            .open_table(PROOFS)
+        let table = read_txn.open_table(PROOFS)
             .map_err(|e| anyhow!("Failed to open proofs table: {}", e))?;
 
-        match table
-            .get(key.as_str())
-            .map_err(|e| anyhow!("Failed to get proof: {}", e))?
-        {
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get proof: {}", e))? {
             Some(value) => {
                 let proof: VerificationLog = bincode::deserialize(value.value())
                     .map_err(|e| anyhow!("Failed to deserialize proof: {}", e))?;
@@ -302,46 +257,31 @@ impl OperatorDb {
     // Config Operations
     // ========================================================================
 
-    /// Store operator config
     pub fn store_config(&self, config: &OperatorConfig) -> Result<()> {
-        let key = "config:operator";
         let value = bincode::serialize(config)
             .map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
 
-        let write_txn = self
-            .db
-            .begin_write()
+        let write_txn = self.db.begin_write()
             .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
         {
-            let mut table = write_txn
-                .open_table(CONFIG)
+            let mut table = write_txn.open_table(CONFIG)
                 .map_err(|e| anyhow!("Failed to open config table: {}", e))?;
-            table
-                .insert(key, value.as_slice())
+            table.insert("config:operator", value.as_slice())
                 .map_err(|e| anyhow!("Failed to insert config: {}", e))?;
         }
-        write_txn
-            .commit()
-            .map_err(|e| anyhow!("Failed to commit config: {}", e))?;
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored operator config");
         Ok(())
     }
 
-    /// Get operator config
     pub fn get_config(&self) -> Result<Option<OperatorConfig>> {
-        let key = "config:operator";
-
-        let read_txn = self
-            .db
-            .begin_read()
+        let read_txn = self.db.begin_read()
             .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
-        let table = read_txn
-            .open_table(CONFIG)
+        let table = read_txn.open_table(CONFIG)
             .map_err(|e| anyhow!("Failed to open config table: {}", e))?;
 
-        match table
-            .get(key)
-            .map_err(|e| anyhow!("Failed to get config: {}", e))?
-        {
+        match table.get("config:operator").map_err(|e| anyhow!("Failed to get config: {}", e))? {
             Some(value) => {
                 let config: OperatorConfig = bincode::deserialize(value.value())
                     .map_err(|e| anyhow!("Failed to deserialize config: {}", e))?;
@@ -349,5 +289,150 @@ impl OperatorDb {
             }
             None => Ok(None),
         }
+    }
+
+    // ========================================================================
+    // Delete Operations
+    // ========================================================================
+
+    pub fn delete_task(&self, task_id: &str) -> Result<bool> {
+        let key = format!("tasks:{}", task_id);
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        let removed;
+        {
+            let mut table = write_txn.open_table(TASKS)
+                .map_err(|e| anyhow!("Failed to open tasks table: {}", e))?;
+            removed = table.remove(key.as_str())
+                .map_err(|e| anyhow!("Failed to remove task: {}", e))?
+                .is_some();
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit delete: {}", e))?;
+
+        if removed {
+            debug!("Deleted task: {}", task_id);
+        }
+        Ok(removed)
+    }
+
+    pub fn delete_session(&self, session_id: &str) -> Result<bool> {
+        let key = format!("sessions:{}", session_id);
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        let removed;
+        {
+            let mut table = write_txn.open_table(SESSIONS)
+                .map_err(|e| anyhow!("Failed to open sessions table: {}", e))?;
+            removed = table.remove(key.as_str())
+                .map_err(|e| anyhow!("Failed to remove session: {}", e))?
+                .is_some();
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit delete: {}", e))?;
+
+        if removed {
+            debug!("Deleted session: {}", session_id);
+        }
+        Ok(removed)
+    }
+
+    pub fn delete_proof(&self, task_id: &str) -> Result<bool> {
+        let key = format!("proofs:{}", task_id);
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        let removed;
+        {
+            let mut table = write_txn.open_table(PROOFS)
+                .map_err(|e| anyhow!("Failed to open proofs table: {}", e))?;
+            removed = table.remove(key.as_str())
+                .map_err(|e| anyhow!("Failed to remove proof: {}", e))?
+                .is_some();
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit delete: {}", e))?;
+
+        if removed {
+            debug!("Deleted proof for task: {}", task_id);
+        }
+        Ok(removed)
+    }
+
+    // ========================================================================
+    // Pruning Operations
+    // ========================================================================
+
+    /// Prune completed tasks older than the given number of days.
+    /// Keeps Disputed and Resolved tasks for audit trail.
+    /// Returns the number of tasks deleted.
+    pub fn prune_completed_tasks(&self, older_than_days: i64) -> Result<usize> {
+        let cutoff = chrono::Utc::now().timestamp() - (older_than_days * 86400);
+        let tasks = self.list_tasks(Some(&DbTaskStatus::Completed))?;
+
+        let mut deleted = 0;
+        for task in &tasks {
+            let task_time = task.completed_at.unwrap_or(task.claimed_at);
+            if task_time < cutoff {
+                if self.delete_task(&task.task_id)? {
+                    deleted += 1;
+                }
+            }
+        }
+
+        if deleted > 0 {
+            info!("Pruned {} completed tasks older than {} days", deleted, older_than_days);
+        }
+        Ok(deleted)
+    }
+
+    /// Prune sessions older than the given number of days (based on last_active).
+    /// Returns the number of sessions deleted.
+    pub fn prune_old_sessions(&self, older_than_days: i64) -> Result<usize> {
+        let cutoff = chrono::Utc::now().timestamp() - (older_than_days * 86400);
+        let sessions = self.list_sessions()?;
+
+        let mut deleted = 0;
+        for session in &sessions {
+            if session.last_active < cutoff {
+                if self.delete_session(&session.session_id)? {
+                    deleted += 1;
+                }
+            }
+        }
+
+        if deleted > 0 {
+            info!("Pruned {} old sessions older than {} days", deleted, older_than_days);
+        }
+        Ok(deleted)
+    }
+
+    // ========================================================================
+    // Statistics
+    // ========================================================================
+
+    pub fn stats(&self) -> Result<DbStats> {
+        let all_tasks = self.list_tasks(None)?;
+        let sessions = self.list_sessions()?;
+
+        // Count proofs
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(PROOFS)
+            .map_err(|e| anyhow!("Failed to open proofs table: {}", e))?;
+        let proof_count = table.range::<&str>(..)
+            .map_err(|e| anyhow!("Failed to iterate proofs: {}", e))?
+            .count();
+
+        let mut task_counts = std::collections::HashMap::new();
+        for task in &all_tasks {
+            *task_counts.entry(format!("{:?}", task.status)).or_insert(0usize) += 1;
+        }
+
+        Ok(DbStats {
+            total_tasks: all_tasks.len(),
+            task_counts,
+            total_sessions: sessions.len(),
+            total_proofs: proof_count,
+        })
     }
 }

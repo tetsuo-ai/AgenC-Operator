@@ -18,7 +18,6 @@
 import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { VoiceState } from '../types';
-import { NEON_PALETTE } from '../styles/palette';
 import { useMouthOpen2D } from '../hooks/useMouthAnimation';
 
 interface TetsuoHologramProps {
@@ -121,6 +120,7 @@ export default function TetsuoHologram({ voiceState, isGlitching }: TetsuoHologr
     processing: { glow: '#cccccc', intensity: 0.8 },
     speaking: { glow: '#ffffff', intensity: 1 },
     error: { glow: '#ffffff', intensity: 0.8 },
+    reconnecting: { glow: '#ffcc00', intensity: 0.7 },
   };
 
   const currentState = stateColors[voiceState];
