@@ -42,6 +42,7 @@ import { useVisemeDriver } from "../../hooks/useVisemeDriver";
 import { useGazeTracking } from "../../hooks/useGazeTracking";
 import { useWiggleBones } from "../../hooks/useWiggleBones";
 import { useAvatarStore } from "../../stores/avatarStore";
+import { QUALITY_PRESETS } from "../../config/renderQuality";
 import { log } from "../../utils/log";
 import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
@@ -1174,6 +1175,9 @@ export default function TetsuoAvatar3D({
   // Get initial camera preset from store
   const initialPreset = useAvatarStore((state) => state.currentPreset);
   const isTransitioning = useAvatarStore((state) => state.isTransitioning);
+  const orbitEnabled = useAvatarStore((state) => state.orbitEnabled);
+  const renderQuality = useAvatarStore((state) => state.renderQuality);
+  const qc = QUALITY_PRESETS[renderQuality];
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -1186,9 +1190,9 @@ export default function TetsuoAvatar3D({
         }}
         onError={() => onLoadError?.()}
         frameloop="always"
-        dpr={[2, 3]}
+        dpr={qc.dpr}
         gl={{
-          antialias: true,
+          antialias: qc.antialias,
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: CONFIG.TONE_MAPPING_EXPOSURE,
           outputColorSpace: THREE.SRGBColorSpace,
@@ -1232,28 +1236,27 @@ export default function TetsuoAvatar3D({
         {/* Ambient fill */}
         <ambientLight intensity={CONFIG.AMBIENT_INTENSITY} />
 
-        {/* Apartment environment for softer, warmer ambient light (intensity scaled down) */}
-        <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} environmentIntensity={CONFIG.ENVIRONMENT_INTENSITY} />
+        {/* Apartment environment for softer, warmer ambient light */}
+        {qc.environmentMap && (
+          <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} environmentIntensity={CONFIG.ENVIRONMENT_INTENSITY} />
+        )}
 
         {/* The reactive model */}
         <ReactiveModel appearance={appearance} status={status} />
 
         {/* ============ POST-PROCESSING EFFECTS ============ */}
-        {CONFIG.ENABLE_POST_PROCESSING && (
+        {qc.postProcessing && (
           <EffectComposer>
-            {/* Subtle bloom for highlights and eye glow */}
             <Bloom
-              intensity={CONFIG.BLOOM_INTENSITY}
-              luminanceThreshold={CONFIG.BLOOM_LUMINANCE_THRESHOLD}
+              intensity={qc.bloomIntensity}
+              luminanceThreshold={qc.bloomThreshold}
               luminanceSmoothing={0.9}
               mipmapBlur
             />
-            {/* Cinematic vignette */}
             <Vignette
-              darkness={CONFIG.VIGNETTE_DARKNESS}
-              offset={CONFIG.VIGNETTE_OFFSET}
+              darkness={qc.vignetteDarkness}
+              offset={qc.vignetteOffset}
             />
-            {/* Anti-aliasing */}
             <SMAA />
           </EffectComposer>
         )}

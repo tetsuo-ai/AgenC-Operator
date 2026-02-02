@@ -1,7 +1,7 @@
 //! ============================================================================
 //! Image Executor - Image Generation via Grok API
 //! ============================================================================
-//! Handles generating images using Grok's grok-2-image-1212 model:
+//! Handles generating images using Grok's grok-2-image model:
 //! - Generate images from text prompts
 //! - Save generated images to disk
 //! ============================================================================
@@ -32,12 +32,12 @@ impl ImageExecutor {
         }
     }
 
-    /// Generate an image from a prompt, returning raw bytes
-    pub async fn generate(&self, prompt: &str) -> Result<Vec<u8>> {
+    /// Generate an image from a prompt, returning raw bytes and base64 string
+    pub async fn generate(&self, prompt: &str) -> Result<(Vec<u8>, String)> {
         info!("Generating image: {}...", &prompt[..prompt.len().min(50)]);
 
         let request = ImageRequest {
-            model: "grok-2-image-1212".to_string(),
+            model: "grok-2-image".to_string(),
             prompt: prompt.to_string(),
             n: 1,
             response_format: "b64_json".to_string(),
@@ -68,20 +68,21 @@ impl ImageExecutor {
             .data
             .first()
             .and_then(|d| d.b64_json.as_ref())
-            .ok_or_else(|| anyhow!("No image data in response"))?;
+            .ok_or_else(|| anyhow!("No image data in response"))?
+            .clone();
 
         let bytes = STANDARD
-            .decode(b64)
+            .decode(&b64)
             .map_err(|e| anyhow!("Failed to decode base64 image: {}", e))?;
 
         info!("Image generated: {} bytes", bytes.len());
 
-        Ok(bytes)
+        Ok((bytes, b64))
     }
 
     /// Generate an image and save it to a file
     pub async fn generate_and_save(&self, prompt: &str, path: &str) -> Result<ImageGenResult> {
-        let bytes = self.generate(prompt).await?;
+        let (bytes, b64) = self.generate(prompt).await?;
 
         // Ensure parent directory exists
         if let Some(parent) = Path::new(path).parent() {
@@ -98,6 +99,7 @@ impl ImageExecutor {
 
         Ok(ImageGenResult {
             path: path.to_string(),
+            b64_data: Some(b64),
         })
     }
 }

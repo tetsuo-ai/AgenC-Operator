@@ -268,6 +268,26 @@ function ChatBubble({ message }: ChatBubbleProps) {
                   TX: {message.result.signature.slice(0, 16)}...
                 </div>
               )}
+              {/* Inline image display for generated images */}
+              {(() => {
+                const data = message.result?.data;
+                if (!data || typeof data !== 'object') return null;
+                const b64 = (data as Record<string, unknown>).b64_data;
+                if (typeof b64 !== 'string') return null;
+                return (
+                  <div className="mt-2 pt-2 border-t border-holo-silver/20">
+                    <img
+                      src={`data:image/png;base64,${b64}`}
+                      alt="Generated image"
+                      className="max-w-full rounded border border-holo-silver/20"
+                      style={{ maxHeight: '300px', objectFit: 'contain' }}
+                    />
+                    <div className="text-[10px] text-holo-silver/40 mt-1">
+                      AI Generated Image
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>

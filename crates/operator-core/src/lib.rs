@@ -58,6 +58,12 @@ pub use executor::{
     Block, ContextElement, MrkdwnText, PlainText, SlackResult,
 };
 
+// Database
+pub use db::{
+    DbTaskStatus, OperatorConfig as DbOperatorConfig, OperatorDb, SessionState, TaskRecord,
+    TranscriptEntry, VerificationLog,
+};
+
 // Transaction retry
 pub use transaction_retry::{
     AsyncTransactionSender, ErrorKind, RetryConfig, SendResult, TransactionSender,

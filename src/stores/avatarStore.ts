@@ -8,6 +8,8 @@
 
 import { create } from 'zustand';
 import type { CameraPreset, CameraMode } from '../types';
+import type { RenderQualityLevel } from '../config/renderQuality';
+import { DEFAULT_QUALITY } from '../config/renderQuality';
 
 // ============================================================================
 // Camera Presets for Genesis 9 model
@@ -63,11 +65,13 @@ interface AvatarState {
   currentMode: CameraMode;
   isTransitioning: boolean;
   orbitEnabled: boolean;
+  renderQuality: RenderQualityLevel;
 
   setPreset: (preset: CameraPreset) => void;
   setCameraMode: (mode: CameraMode) => void;
   setTransitioning: (transitioning: boolean) => void;
   setOrbitEnabled: (enabled: boolean) => void;
+  setRenderQuality: (quality: RenderQualityLevel) => void;
 }
 
 // ============================================================================
@@ -79,6 +83,7 @@ export const useAvatarStore = create<AvatarState>((set) => ({
   currentMode: 'waist',
   isTransitioning: false,
   orbitEnabled: false,
+  renderQuality: (localStorage.getItem('tetsuo-render-quality') as RenderQualityLevel) || DEFAULT_QUALITY,
 
   setPreset: (preset) => set({ currentPreset: preset, isTransitioning: true }),
   setCameraMode: (mode) => set({
@@ -88,4 +93,8 @@ export const useAvatarStore = create<AvatarState>((set) => ({
   }),
   setTransitioning: (transitioning) => set({ isTransitioning: transitioning }),
   setOrbitEnabled: (enabled) => set({ orbitEnabled: enabled }),
+  setRenderQuality: (quality) => {
+    localStorage.setItem('tetsuo-render-quality', quality);
+    set({ renderQuality: quality });
+  },
 }));

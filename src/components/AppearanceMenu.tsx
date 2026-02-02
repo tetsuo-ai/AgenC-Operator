@@ -20,6 +20,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, useAppearance, usePresets } from '../hooks/useAppStore';
 import { useAvatarStore } from '../stores/avatarStore';
 import type { AgentAppearance, CameraMode } from '../types';
+import type { RenderQualityLevel } from '../config/renderQuality';
+import { QUALITY_PRESETS } from '../config/renderQuality';
 
 // ============================================================================
 // Props Interface
@@ -158,6 +160,8 @@ export default function AppearanceMenu({ isOpen, onClose, onToggle }: Appearance
 
   const currentCameraMode = useAvatarStore((s) => s.currentMode);
   const setCameraMode = useAvatarStore((s) => s.setCameraMode);
+  const renderQuality = useAvatarStore((s) => s.renderQuality);
+  const setRenderQuality = useAvatarStore((s) => s.setRenderQuality);
 
   // ============================================================================
   // Keyboard Shortcuts
@@ -333,6 +337,28 @@ export default function AppearanceMenu({ isOpen, onClose, onToggle }: Appearance
                       }`}
                     >
                       {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Render Quality */}
+              <div className="space-y-3">
+                <h4 className="text-holo-silver text-xs uppercase tracking-wider border-b border-cyber-light pb-1">
+                  Render Quality
+                </h4>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['low', 'medium', 'high', 'ultra'] as RenderQualityLevel[]).map((level) => (
+                    <button
+                      key={level}
+                      onClick={() => setRenderQuality(level)}
+                      className={`px-2 py-1.5 text-xs uppercase tracking-wider rounded border transition-all ${
+                        renderQuality === level
+                          ? 'bg-neon-cyan/20 border-neon-cyan text-neon-cyan'
+                          : 'border-cyber-light text-holo-silver hover:border-neon-cyan hover:text-neon-cyan'
+                      }`}
+                    >
+                      {QUALITY_PRESETS[level].label}
                     </button>
                   ))}
                 </div>
