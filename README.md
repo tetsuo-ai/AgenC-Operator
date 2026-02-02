@@ -4,8 +4,8 @@
 
 A voice controlled desktop operator for the [AgenC Solana protocol](https://github.com/tetsuo-ai/AgenC). Built with Tauri v2 (Rust + Three.js), featuring an immersive companion experience, a swappable 2D/3D holographic avatar, and natural voice commands powered by Grok Voice API.
 
+<img width="1002" height="490" alt="image" src="https://github.com/user-attachments/assets/b689331c-436a-4a48-87dd-a2448b8af332" />
 
-<img width="736" height="559" alt="image" src="https://github.com/user-attachments/assets/a3fe3d4c-b417-4b31-906e-7bf4dc7b106c" />
 
 
 [![CI](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml/badge.svg)](https://github.com/tetsuo-ai/AgenC-Operator/actions/workflows/ci.yml)
