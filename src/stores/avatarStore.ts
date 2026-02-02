@@ -9,7 +9,21 @@
 import { create } from 'zustand';
 import type { CameraPreset, CameraMode } from '../types';
 import type { RenderQualityLevel } from '../config/renderQuality';
-import { DEFAULT_QUALITY } from '../config/renderQuality';
+import { DEFAULT_QUALITY, QUALITY_PRESETS } from '../config/renderQuality';
+
+// Quality preset version — bump this to force-reset users to the new default
+// when preset values change significantly (e.g. bloom retuning).
+const QUALITY_VERSION = '2';
+
+function getInitialQuality(): RenderQualityLevel {
+  const version = localStorage.getItem('tetsuo-render-quality-v');
+  const cached = localStorage.getItem('tetsuo-render-quality') as RenderQualityLevel | null;
+  if (version === QUALITY_VERSION && cached && cached in QUALITY_PRESETS) return cached;
+  // Version mismatch or invalid — reset to new default
+  localStorage.setItem('tetsuo-render-quality-v', QUALITY_VERSION);
+  localStorage.setItem('tetsuo-render-quality', DEFAULT_QUALITY);
+  return DEFAULT_QUALITY;
+}
 
 // ============================================================================
 // Camera Presets for Genesis 9 model
@@ -83,7 +97,7 @@ export const useAvatarStore = create<AvatarState>((set) => ({
   currentMode: 'waist',
   isTransitioning: false,
   orbitEnabled: false,
-  renderQuality: (localStorage.getItem('tetsuo-render-quality') as RenderQualityLevel) || DEFAULT_QUALITY,
+  renderQuality: getInitialQuality(),
 
   setPreset: (preset) => set({ currentPreset: preset, isTransitioning: true }),
   setCameraMode: (mode) => set({
