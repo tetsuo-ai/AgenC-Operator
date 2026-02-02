@@ -11,16 +11,15 @@ use operator_core::{
     AgencTask, ExecutionResult, IntentAction, PolicyCheck, PolicyGate, ProtocolState, SolanaExecutor,
     VoiceIntent, VoiceState, WalletInfo,
     // Access control
-    AccessGate, AccessTier, AccessTierInfo, Feature,
+    AccessGate, AccessTierInfo, Feature,
     // Memory system
-    ConversationTurn, EmbeddingService, Memory, MemoryManager, MemoryType, UserContext,
+    Memory, MemoryManager, MemoryType, UserContext,
     // Executors
     DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
     JupiterSwapExecutor, TwitterExecutor,
     // Types for executors
     SwapParams, SwapQuote, TokenPrice, TweetResult,
     DiscordResult, EmailResult, BulkEmailResult, ImageGenResult,
-    GistResult, IssueResult, CommentResult, WorkflowResult,
     // Param types for intent routing
     CodeFixParams, CodeReviewParams, CodeGenerateParams, CodeExplainParams,
     TweetParams, ThreadParams, DiscordMessageParams, DiscordEmbedParams,
@@ -2981,8 +2980,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        // TODO: Generate signing keypair and set pubkey in tauri.conf.json before release
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // NOTE: Updater disabled until plugins.updater is configured in tauri.conf.json
+        // .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             // Wallet (async spawned)

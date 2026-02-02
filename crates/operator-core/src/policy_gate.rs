@@ -10,7 +10,6 @@
 //! approves all state-changing transactions.
 //! ============================================================================
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 

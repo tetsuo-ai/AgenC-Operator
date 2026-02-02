@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    signature::{Keypair, Signature},
+    signature::Keypair,
     signer::Signer,
     transaction::VersionedTransaction,
 };
@@ -19,7 +19,7 @@ use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
 
 use crate::transaction_retry::{
-    classify_error, send_result_to_result, ErrorKind, RetryConfig, SendResult, TransactionSender,
+    classify_error, ErrorKind, SendResult, TransactionSender,
 };
 use crate::types::{SwapParams, SwapQuote, TokenPrice};
 
@@ -192,7 +192,7 @@ impl JupiterSwapExecutor {
             .map_err(|e| anyhow!("Failed to deserialize transaction: {}", e))?;
 
         // Sign the transaction using restored keypair
-        let keypair = Keypair::from_bytes(&keypair_bytes)
+        let keypair = Keypair::try_from(keypair_bytes.as_slice())
             .map_err(|e| anyhow!("Failed to restore keypair: {}", e))?;
 
         // Retry loop for blockhash expiration

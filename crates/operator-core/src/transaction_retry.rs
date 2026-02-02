@@ -11,11 +11,9 @@
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     signature::Signature,
     transaction::VersionedTransaction,
 };
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};

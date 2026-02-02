@@ -13,7 +13,7 @@ pub use types::{
 };
 
 use anyhow::{anyhow, Result};
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, TableDefinition};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 

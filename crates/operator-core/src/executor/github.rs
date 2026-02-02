@@ -10,7 +10,7 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::info;
 
 /// GitHub API base URL
 const GITHUB_API: &str = "https://api.github.com";

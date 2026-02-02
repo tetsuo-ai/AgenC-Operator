@@ -18,8 +18,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
 
-use crate::types::VoiceState;
-
 /// Audio sample rate for whisper (16kHz mono)
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 
@@ -120,8 +118,8 @@ impl LocalVoiceProcessor {
     fn capture_audio_loop(
         is_listening: Arc<AtomicBool>,
         sample_buffer: Arc<std::sync::Mutex<Vec<f32>>>,
-        tx: mpsc::Sender<String>,
-        model_path: Option<String>,
+        _tx: mpsc::Sender<String>,
+        _model_path: Option<String>,
     ) -> Result<()> {
         let host = cpal::default_host();
         let device = host.default_input_device()
@@ -178,8 +176,8 @@ impl LocalVoiceProcessor {
     /// Transcribe audio samples using whisper-rs
     /// This is the core offline ASR function
     #[allow(dead_code)]
-    async fn transcribe_whisper(&self, samples: &[f32]) -> Result<String> {
-        let model_path = self.model_path.as_ref()
+    async fn transcribe_whisper(&self, _samples: &[f32]) -> Result<String> {
+        let _model_path = self.model_path.as_ref()
             .ok_or_else(|| anyhow!("Whisper model not loaded"))?;
 
         // TODO: Full whisper-rs integration

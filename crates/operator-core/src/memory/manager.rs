@@ -10,7 +10,7 @@ use tracing::{debug, info};
 use super::embeddings::EmbeddingService;
 use super::store::MemoryStore;
 use super::types::{ConversationTurn, Memory, MemoryType, UserContext};
-use crate::access::{AccessGate, AccessTier, TETSUO_DECIMALS};
+use crate::access::AccessGate;
 
 /// Memory manager combining store and embeddings
 pub struct MemoryManager {
