@@ -510,7 +510,7 @@ export const DEFAULT_APPEARANCE: AgentAppearance = {
 /**
  * Camera modes for different framing of the avatar.
  */
-export type CameraMode = 'closeup' | 'waist' | 'full-body' | 'presentation' | 'custom';
+export type CameraMode = 'face' | 'bust' | 'closeup' | 'waist' | 'full-body' | 'presentation' | 'custom';
 
 /**
  * Camera preset configuration with position, target, and field of view.
@@ -519,4 +519,49 @@ export interface CameraPreset {
   position: [number, number, number];
   target: [number, number, number];
   fov: number;
+}
+
+// ============================================================================
+// Database Types (redb persistence)
+// ============================================================================
+
+export type DbTaskStatus = 'Claimed' | 'InProgress' | 'Completed' | 'Disputed' | 'Resolved';
+
+export interface TaskRecord {
+  task_id: string;
+  payload: number[];
+  status: DbTaskStatus;
+  claimed_at: number;
+  completed_at: number | null;
+  on_chain_signature: string | null;
+  description: string | null;
+  reward_lamports: number | null;
+  creator: string | null;
+}
+
+export interface TranscriptEntry {
+  role: string;
+  content: string;
+  timestamp: number;
+}
+
+export interface SessionState {
+  session_id: string;
+  transcript: TranscriptEntry[];
+  active_task_ids: string[];
+  command_history: string[];
+  created_at: number;
+  last_active: number;
+}
+
+export interface DbStats {
+  total_tasks: number;
+  task_counts: Record<string, number>;
+  total_sessions: number;
+  total_proofs: number;
+}
+
+export interface DbPruneResult {
+  tasks_pruned: number;
+  sessions_pruned: number;
 }

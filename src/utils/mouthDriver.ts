@@ -40,13 +40,13 @@ export interface MouthDriverConfig {
 
 const DEFAULT_CONFIG: MouthDriverConfig = {
   fftSize: 256,
-  smoothingTimeConstant: 0.6,
-  noiseGate: 0.01,
-  minRms: 0.02,
-  maxRms: 0.45,
-  outputSmoothing: 0.3,
-  attackSpeed: 0.35,
-  decaySpeed: 0.2,
+  smoothingTimeConstant: 0.5,
+  noiseGate: 0.008,
+  minRms: 0.01,
+  maxRms: 0.20,
+  outputSmoothing: 0.25,
+  attackSpeed: 0.5,
+  decaySpeed: 0.18,
 };
 
 // ============================================================================
@@ -135,8 +135,8 @@ export class MouthDriver {
       1,
       Math.max(0, (gatedRms - this.config.minRms) / (this.config.maxRms - this.config.minRms))
     );
-    // Power curve: soft sounds → small openings, loud → wide (more expressive range)
-    const normalized = Math.pow(linear, 0.7);
+    // Power curve: lower exponent = more expressive range from normal speech
+    const normalized = Math.pow(linear, 0.5);
 
     // Apply asymmetric smoothing (fast attack, slow decay)
     const speed = normalized > this.currentValue

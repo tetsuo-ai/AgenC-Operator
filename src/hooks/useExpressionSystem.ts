@@ -20,6 +20,7 @@ import { useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { log } from '../utils/log';
 import { MODEL_CONFIG } from '../config/modelConfig';
+import { FacsMorphController } from '../utils/dazMorphMap';
 
 // ============================================================================
 // Configuration
@@ -153,6 +154,12 @@ interface ExpressionState {
   prevAmplitude: number;
   amplitudeAccum: number;
   lastBrowPulseTime: number;
+  // Speech micro-smile (subtle engagement expression)
+  speechSmileTarget: number;
+  speechSmileCurrent: number;
+  // Speech eye-widen (brief widening on emphasis)
+  speechEyeWidenTarget: number;
+  speechEyeWidenCurrent: number;
   // Micro-expressions during idle
   nextMicroExprTime: number;
   microExprType: 'brow_twitch' | 'lip_press' | 'none';
@@ -185,6 +192,8 @@ export interface UseExpressionSystemReturn {
   triggerExpression: (type: ExpressionType, duration: number) => void;
   /** Set a continuous emotion with smooth blending transition */
   setEmotion: (emotion: EmotionType, intensity?: number) => void;
+  /** Set the FACS morph controller for morph-driven expressions */
+  setMorphController: (controller: FacsMorphController) => void;
 }
 
 // ============================================================================
@@ -241,6 +250,7 @@ export function useExpressionSystem(
   const restPosesRef = useRef<ExpressionRestPoses>({});
   const morphRef = useRef<ExpressionMorphRefs | null>(null);
   const initializedRef = useRef(false);
+  const morphControllerRef = useRef<FacsMorphController | null>(null);
 
   const stateRef = useRef<ExpressionState>({
     time: 0,
@@ -254,6 +264,10 @@ export function useExpressionSystem(
     prevAmplitude: 0,
     amplitudeAccum: 0,
     lastBrowPulseTime: 0,
+    speechSmileTarget: 0,
+    speechSmileCurrent: 0,
+    speechEyeWidenTarget: 0,
+    speechEyeWidenCurrent: 0,
     nextMicroExprTime: Math.random() * 15 + 8,
     microExprType: 'none',
     microExprStart: 0,
@@ -458,40 +472,55 @@ export function useExpressionSystem(
     }
 
     // ========================================
-    // Speech-reactive Brow Movement
+    // Speech-reactive Expressions (brows, micro-smile, eye widen)
     // ========================================
+    // Lower thresholds for more responsive facial animation during speech.
+    // All effects are very subtle (0.1-0.2 max) for natural engagement look.
     if (isSpeaking && mouthOpen > 0) {
       const ampDelta = mouthOpen - state.prevAmplitude;
       state.prevAmplitude = mouthOpen;
 
-      if (ampDelta > 0.03) {
+      if (ampDelta > 0.02) {
         state.amplitudeAccum += ampDelta;
       } else {
-        state.amplitudeAccum *= 0.9;
+        state.amplitudeAccum *= 0.92;
       }
 
-      // Fire a brow pulse on significant amplitude spikes
-      if (state.amplitudeAccum > 0.15 && t - state.lastBrowPulseTime > 1.5) {
-        state.speechBrowTarget = Math.min(0.5, state.amplitudeAccum) * config.browEmphasisAmount;
+      // Brow pulse on emphasis spikes (lowered threshold: 0.15→0.08, cooldown: 1.5→0.8s)
+      if (state.amplitudeAccum > 0.08 && t - state.lastBrowPulseTime > 0.8) {
+        state.speechBrowTarget = Math.min(0.35, state.amplitudeAccum) * config.browEmphasisAmount;
         state.lastBrowPulseTime = t;
         state.amplitudeAccum = 0;
+
+        // Eye widen on the same emphasis spike (very brief, subtle)
+        state.speechEyeWidenTarget = Math.min(0.15, state.speechBrowTarget * 0.5);
       }
 
       if (t - state.lastBrowPulseTime > 0.4) {
         state.speechBrowTarget *= 0.92;
+        state.speechEyeWidenTarget *= 0.88; // Eye widen decays faster
       }
 
+      // Micro-smile during speech: subtle engagement expression
+      // Base smile proportional to mouth activity, very low intensity
+      const speechActivity = Math.min(1, mouthOpen * 2); // 0-1 based on mouth openness
+      state.speechSmileTarget = speechActivity * 0.08 + 0.04; // 0.04 base + up to 0.08
+
       // Nostril flare on emphasis spikes
-      if (state.amplitudeAccum > 0.1) {
-        state.nostrilFlareTarget = Math.min(0.06, state.amplitudeAccum * 0.1);
+      if (state.amplitudeAccum > 0.06) {
+        state.nostrilFlareTarget = Math.min(0.06, state.amplitudeAccum * 0.12);
       }
     } else {
       state.prevAmplitude = 0;
       state.amplitudeAccum = 0;
       state.speechBrowTarget *= 0.9;
+      state.speechSmileTarget *= 0.85;
+      state.speechEyeWidenTarget *= 0.85;
       state.nostrilFlareTarget *= 0.85;
     }
     state.speechBrowCurrent = THREE.MathUtils.lerp(state.speechBrowCurrent, state.speechBrowTarget, delta * 5);
+    state.speechSmileCurrent = THREE.MathUtils.lerp(state.speechSmileCurrent, state.speechSmileTarget, delta * 4);
+    state.speechEyeWidenCurrent = THREE.MathUtils.lerp(state.speechEyeWidenCurrent, state.speechEyeWidenTarget, delta * 6);
     state.nostrilFlareCurrent = THREE.MathUtils.lerp(state.nostrilFlareCurrent, state.nostrilFlareTarget, delta * 6);
 
     // ========================================
@@ -592,8 +621,11 @@ export function useExpressionSystem(
     // Combine nostril flare sources
     const totalNostrilFlare = state.nostrilFlareCurrent + expressionNostrilFlare;
 
-    // Total smile: random smiles + triggered expression boosts + emotion
-    const totalSmile = Math.min(1, state.smileIntensityCurrent + expressionSmileBoost);
+    // Total smile: random smiles + triggered expression boosts + emotion + speech micro-smile
+    const totalSmile = Math.min(1, state.smileIntensityCurrent + expressionSmileBoost + state.speechSmileCurrent);
+
+    // Add speech eye-widen to expression eye-widen
+    eyeWidenAmount += state.speechEyeWidenCurrent;
 
     // Happy eyes during speech (subtle eyelid squint)
     let eyeSquintAmount = 0;
@@ -604,9 +636,43 @@ export function useExpressionSystem(
     eyeSquintAmount += totalSmile * 0.02;
 
     // ========================================
-    // Apply Morph Targets (if available)
+    // Apply FACS Morph Expressions (primary, when morph controller available)
     // ========================================
-    if (morphRef.current && morphRef.current.mesh.morphTargetInfluences) {
+    const morphCtrl = morphControllerRef.current;
+    const boneScale = morphCtrl ? 0.3 : 1.0;
+
+    if (morphCtrl) {
+      // Smile: morph-driven
+      morphCtrl.setMorph('mouthSmileLeft', totalSmile);
+      morphCtrl.setMorph('mouthSmileRight', totalSmile);
+      morphCtrl.setMorph('cheekSquintLeft', totalSmile * 0.4);
+      morphCtrl.setMorph('cheekSquintRight', totalSmile * 0.4);
+
+      // Brow raise (L/R — no combined morph)
+      morphCtrl.setMorph('browInnerUpLeft', browRaiseAmount);
+      morphCtrl.setMorph('browInnerUpRight', browRaiseAmount);
+      morphCtrl.setMorph('browOuterUpLeft', browRaiseAmount * 0.5);
+      morphCtrl.setMorph('browOuterUpRight', browRaiseAmount * 0.5);
+
+      // Brow knit (L/R — no combined morph)
+      morphCtrl.setMorph('browDownLeft', browKnitAmount);
+      morphCtrl.setMorph('browDownRight', browKnitAmount);
+      morphCtrl.setMorph('browSqueezeLeft', browKnitAmount * 0.5);
+      morphCtrl.setMorph('browSqueezeRight', browKnitAmount * 0.5);
+
+      // Eye squint — use cheekSquint (eyeSquint morphs don't exist on this model)
+      morphCtrl.setMorph('cheekSquintLeft', eyeSquintAmount);
+      morphCtrl.setMorph('cheekSquintRight', eyeSquintAmount);
+
+      // Eye widen on emphasis (very subtle upper eyelid raise)
+      if (eyeWidenAmount > 0.01) {
+        morphCtrl.setMorph('eyeWideLeft', Math.min(0.2, eyeWidenAmount));
+        morphCtrl.setMorph('eyeWideRight', Math.min(0.2, eyeWidenAmount));
+      }
+    }
+
+    // Apply legacy morph targets (if available and no FACS controller)
+    if (!morphCtrl && morphRef.current && morphRef.current.mesh.morphTargetInfluences) {
       const influences = morphRef.current.mesh.morphTargetInfluences;
 
       if (morphRef.current.smileIndex !== undefined) {
@@ -637,16 +703,15 @@ export function useExpressionSystem(
     }
 
     // ========================================
-    // Apply Brow Bone Rotations
+    // Apply Brow Bone Rotations (scaled down when morphs available)
     // ========================================
     const totalBrowRaise = browRaiseAmount + microBrowTwitch;
 
     if (totalBrowRaise > 0.001 || browKnitAmount > 0.001) {
       if (bones.browInnerL && rest.browInnerL) {
-        // Concerned knit: rotate inward (positive X). Raise: negative X.
         const target = browKnitAmount > 0
-          ? rest.browInnerL.x + browKnitAmount
-          : rest.browInnerL.x - totalBrowRaise;
+          ? rest.browInnerL.x + browKnitAmount * boneScale
+          : rest.browInnerL.x - totalBrowRaise * boneScale;
         bones.browInnerL.rotation.x = THREE.MathUtils.lerp(
           bones.browInnerL.rotation.x, target, delta * 5
         );
@@ -654,8 +719,8 @@ export function useExpressionSystem(
       if (bones.browInnerR && rest.browInnerR) {
         const rightAmount = microBrowTwitch > 0 ? totalBrowRaise * 0.4 : totalBrowRaise;
         const target = browKnitAmount > 0
-          ? rest.browInnerR.x + browKnitAmount
-          : rest.browInnerR.x - rightAmount;
+          ? rest.browInnerR.x + browKnitAmount * boneScale
+          : rest.browInnerR.x - rightAmount * boneScale;
         bones.browInnerR.rotation.x = THREE.MathUtils.lerp(
           bones.browInnerR.rotation.x, target, delta * 5
         );
@@ -663,7 +728,7 @@ export function useExpressionSystem(
       if (bones.browOuterL && rest.browOuterL) {
         bones.browOuterL.rotation.x = THREE.MathUtils.lerp(
           bones.browOuterL.rotation.x,
-          rest.browOuterL.x - totalBrowRaise * 0.5,
+          rest.browOuterL.x - totalBrowRaise * 0.5 * boneScale,
           delta * 5
         );
       }
@@ -671,7 +736,7 @@ export function useExpressionSystem(
         const rightOuter = microBrowTwitch > 0 ? totalBrowRaise * 0.2 : totalBrowRaise * 0.5;
         bones.browOuterR.rotation.x = THREE.MathUtils.lerp(
           bones.browOuterR.rotation.x,
-          rest.browOuterR.x - rightOuter,
+          rest.browOuterR.x - rightOuter * boneScale,
           delta * 5
         );
       }
@@ -698,8 +763,8 @@ export function useExpressionSystem(
     // useMouthAnimation sets cornerL/R.rotation.z for lip spread
     // Here we add rotation on X (upward = smile) additively
     if (totalSmile > 0.001) {
-      const smileCornerAmount = totalSmile * 0.12; // lip corner rotation for smile
-      const smileCheekAmount = totalSmile * 0.04;  // cheek raise for Duchenne
+      const smileCornerAmount = totalSmile * 0.12 * boneScale;
+      const smileCheekAmount = totalSmile * 0.04 * boneScale;
 
       if (bones.lipCornerL && rest.lipCornerL) {
         // Additive: read current rotation (may include mouth spread), add smile offset
@@ -766,12 +831,12 @@ export function useExpressionSystem(
     if (totalNostrilFlare > 0.001) {
       if (bones.nostrilL && rest.nostrilL) {
         bones.nostrilL.rotation.z = THREE.MathUtils.lerp(
-          bones.nostrilL.rotation.z, rest.nostrilL.z + totalNostrilFlare, delta * 8
+          bones.nostrilL.rotation.z, rest.nostrilL.z + totalNostrilFlare * boneScale, delta * 8
         );
       }
       if (bones.nostrilR && rest.nostrilR) {
         bones.nostrilR.rotation.z = THREE.MathUtils.lerp(
-          bones.nostrilR.rotation.z, rest.nostrilR.z - totalNostrilFlare, delta * 8
+          bones.nostrilR.rotation.z, rest.nostrilR.z - totalNostrilFlare * boneScale, delta * 8
         );
       }
     } else {
@@ -830,9 +895,9 @@ export function useExpressionSystem(
     if (t - state.debugLogTime >= 10.0) {
       state.debugLogTime = t;
       log.debug(
-        `[ExpressionSystem] smile=${totalSmile.toFixed(2)}, ` +
+        `[ExpressionSystem] smile=${totalSmile.toFixed(2)} (speech=${state.speechSmileCurrent.toFixed(2)}), ` +
         `browRaise=${browRaiseAmount.toFixed(2)}, ` +
-        `eyeWiden=${eyeWidenAmount.toFixed(2)}, ` +
+        `eyeWiden=${eyeWidenAmount.toFixed(2)} (speech=${state.speechEyeWidenCurrent.toFixed(2)}), ` +
         `nostril=${totalNostrilFlare.toFixed(3)}, ` +
         `emotion=${state.currentEmotion}(${emoIntensity.toFixed(2)}), ` +
         `speaking=${isSpeaking}`
@@ -873,6 +938,12 @@ export function useExpressionSystem(
     log.debug(`[ExpressionSystem] Emotion → ${emotion} (intensity=${intensity.toFixed(2)})`);
   }, []);
 
+  // Set the FACS morph controller
+  const setMorphController = useCallback((controller: FacsMorphController) => {
+    morphControllerRef.current = controller;
+    log.info(`[ExpressionSystem] FACS morph controller set (${controller.morphCount} morphs)`);
+  }, []);
+
   // Register this instance as the global expression system so the voice pipeline
   // (which lives in a different component tree) can push emotions.
   globalExpressionSystemRef = { setEmotion, triggerExpression };
@@ -882,6 +953,7 @@ export function useExpressionSystem(
     update,
     triggerExpression,
     setEmotion,
+    setMorphController,
   };
 }
 

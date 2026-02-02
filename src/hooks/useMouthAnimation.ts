@@ -32,6 +32,7 @@ import {
 } from '../utils/glbInspector';
 import { log } from '../utils/log';
 import type { VisemeWeights } from '../constants/visemeMap';
+import { FacsMorphController } from '../utils/dazMorphMap';
 
 // ============================================================================
 // Configuration
@@ -55,13 +56,13 @@ export interface MouthAnimationConfig {
 }
 
 const DEFAULT_CONFIG: MouthAnimationConfig = {
-  maxJawRotation: 0.15, // ~8.5 degrees
+  maxJawRotation: 0.15, // ~8.5 degrees — natural speech range
   jawRotationAxis: 'x',
-  jawRotationDirection: 1,
+  jawRotationDirection: -1, // Negative X opens jaw on Genesis 9
   debug: false,
   forceTest: -1, // Set to 0.9 to test if rig works
   useJawBone: true, // Use jaw bone for additional realism
-  jawBoneContribution: 0.3, // 30% jaw bone when morph targets available
+  jawBoneContribution: 1.0, // Full jaw bone — morph targets may be on non-face mesh
 };
 
 // ============================================================================
@@ -98,6 +99,12 @@ export interface UseMouthAnimationReturn {
   getMouthDriver: () => MouthDriver;
   /** Reset animation state */
   reset: () => void;
+  /** Set the FACS morph controller for morph-driven visemes */
+  setMorphController: (controller: FacsMorphController) => void;
+  /** Get lip bone references for debug/testing */
+  getLipBones: () => LipBoneRefs;
+  /** Get lip bone rest poses for debug/testing */
+  getLipRestPoses: () => LipBoneRestPoses;
 }
 
 // ============================================================================
@@ -154,6 +161,10 @@ export function useMouthAnimation(
   const lipRestPosesRef = useRef<LipBoneRestPoses>({});
   // Viseme target: when non-null, lip bones are driven by viseme shapes
   const visemeTargetRef = useRef<VisemeWeights | null>(null);
+  // Lip bone debug counter
+  const lipDebugCounterRef = useRef<number>(0);
+  // FACS morph controller for morph-driven visemes
+  const morphControllerRef = useRef<FacsMorphController | null>(null);
 
   // Get or create the global audio context and mouth driver
   const getAudioContext = useCallback((): AudioContext => {
@@ -249,6 +260,18 @@ export function useMouthAnimation(
     if (foundLipBones.length > 0) {
       log.info(`[MouthAnimation] Found ${foundLipBones.length} lip bones:`);
       foundLipBones.forEach(b => log.info(`[MouthAnimation]   + ${b}`));
+      // Log rest rotations for all axes to determine correct rotation axis
+      for (const [slot, bone] of Object.entries(lipBones)) {
+        if (bone) {
+          const r = bone.rotation;
+          log.info(`[MouthAnimation] Lip rest "${slot}" (${bone.name}): x=${r.x.toFixed(4)} y=${r.y.toFixed(4)} z=${r.z.toFixed(4)} order=${r.order}`);
+          // Log world quaternion to understand bone orientation
+          const worldQ = new THREE.Quaternion();
+          bone.getWorldQuaternion(worldQ);
+          const euler = new THREE.Euler().setFromQuaternion(worldQ);
+          log.info(`[MouthAnimation] Lip world "${slot}": x=${euler.x.toFixed(4)} y=${euler.y.toFixed(4)} z=${euler.z.toFixed(4)}`);
+        }
+      }
     } else {
       log.warn('[MouthAnimation] No lip bones found - lip deformation disabled');
     }
@@ -310,7 +333,7 @@ export function useMouthAnimation(
 
     // Secondary smoothing: lerp toward target for more natural, flowing movement
     const prev = smoothedMouthRef.current;
-    const lerpSpeed = mouthOpen > prev ? 0.4 : 0.25; // faster open, gentler close
+    const lerpSpeed = mouthOpen > prev ? 0.6 : 0.3; // fast open, moderate close
     const smoothed = prev + (mouthOpen - prev) * lerpSpeed;
     smoothedMouthRef.current = smoothed;
 
@@ -362,15 +385,122 @@ export function useMouthAnimation(
     const lips = lipBonesRef.current;
     const lipRest = lipRestPosesRef.current;
     const viseme = visemeTargetRef.current;
+    const morphCtrl = morphControllerRef.current;
 
-    if (Object.keys(lips).length > 0) {
+    if (viseme && morphCtrl) {
+      // === FACS MORPH VISEME MODE: Drive morphs directly from viseme weights ===
+      // Intensity scales with audio amplitude — capped for natural, subtle speech
+      const intensity = Math.max(0.1, finalMouth * 0.8);
+
+      // --- Core mouth shapes ---
+
+      // Jaw opening
+      morphCtrl.setMorph('jawOpen', viseme.jawOpen * intensity);
+
+      // Lip stretch / spread (E, I, S sounds — horizontal widening, teeth showing)
+      morphCtrl.setSymmetric('mouthSmileWiden', viseme.lipStretch * intensity);
+      morphCtrl.setSymmetric('mouthWiden', viseme.lipStretch * intensity * 0.4);
+
+      // Lip rounding / pucker (O, U, R, CH sounds — forward protrusion)
+      morphCtrl.setQuad('mouthPurse', viseme.lipPucker * intensity);
+      morphCtrl.setQuad('mouthFunnel', viseme.lipPucker * intensity * 0.5);
+      morphCtrl.setQuad('mouthForward', viseme.lipPucker * intensity * 0.3);
+
+      // Lip press / close (P, B, M sounds — lips together)
+      // Active when pucker is high but jaw is nearly closed
+      const isLipPress = viseme.lipPucker > 0.15 && viseme.jawOpen < 0.15;
+      morphCtrl.setQuad('mouthClose', isLipPress ? viseme.lipPucker * intensity * 0.6 : 0);
+      morphCtrl.setQuad('mouthCompress', isLipPress ? viseme.lipPucker * intensity * 0.3 : 0);
+
+      // Upper/lower lip movement (reduced ~30%)
+      // lipStretch adds teeth-showing for E/I sounds via upperUp
+      const upperUp = viseme.lipUpperRaise * 0.7 + viseme.lipStretch * 0.2;
+      morphCtrl.setSymmetric('mouthUpperUp', upperUp * intensity);
+      morphCtrl.setSymmetric('mouthLowerDown', viseme.lipLowerDrop * intensity * 0.7);
+
+      // Tongue
+      morphCtrl.setMorph('tongueOut', viseme.tongueOut * intensity);
+
+      // Natural lip separation proportional to jaw (reduced ~40%)
+      morphCtrl.setMorph('mouthLipsPartCenter', viseme.jawOpen * intensity * 0.4);
+      morphCtrl.setSymmetric('mouthLipsPart', viseme.jawOpen * intensity * 0.3);
+
+      // --- Secondary facial animation for expressiveness ---
+
+      // Subtle smile avoids dead/robotic look during speech
+      morphCtrl.setSymmetric('mouthSmile', 0.06 + viseme.lipStretch * 0.04);
+
+      // Cheek engagement — slight squint correlates with speech effort
+      morphCtrl.setSymmetric('cheekSquint', 0.08 + finalMouth * 0.08);
+
+      // Volume-reactive brow emphasis on louder moments
+      const browLift = velocity > 0.008 && finalMouth > 0.35
+        ? Math.min(0.2, (finalMouth - 0.35) * 0.3)
+        : 0;
+      morphCtrl.setSymmetric('browInnerUp', browLift);
+      morphCtrl.setSymmetric('browOuterUp', browLift * 0.5);
+
+      // Jaw bone contribution
+      if (jawBoneRef.current && jawRestRotationRef.current) {
+        const jawAmount = viseme.jawOpen * intensity * cfg.maxJawRotation * cfg.jawRotationDirection;
+        const bone = jawBoneRef.current.bone;
+        const rest = jawRestRotationRef.current;
+        switch (cfg.jawRotationAxis) {
+          case 'x': bone.rotation.x = rest.x + jawAmount; break;
+          case 'y': bone.rotation.y = rest.y + jawAmount; break;
+          case 'z': bone.rotation.z = rest.z + jawAmount; break;
+        }
+      }
+
+      // Lip bones: Y-axis drives lip parting (Genesis 9 bone orientations)
+      // Lower lips (rest x≈0.41): +Y opens downward
+      // Upper lips (rest x≈-1.58, z≈3.14): -Y opens upward (flipped 180°)
+      if (Object.keys(lips).length > 0) {
+        // Lower lip: +Y to drop open, proportional to jawOpen + lipLowerDrop
+        const lowerOpen = (viseme.lipLowerDrop + viseme.jawOpen * 0.5) * intensity * 0.20;
+        if (lips.centerLower && lipRest.centerLower) {
+          lips.centerLower.rotation.y = lipRest.centerLower.y + lowerOpen;
+        }
+        if (lips.lowerL && lipRest.lowerL) {
+          lips.lowerL.rotation.y = lipRest.lowerL.y + lowerOpen * 0.8;
+        }
+        if (lips.lowerR && lipRest.lowerR) {
+          lips.lowerR.rotation.y = lipRest.lowerR.y + lowerOpen * 0.8;
+        }
+
+        // Upper lip: -Y to raise open, proportional to lipUpperRaise + jawOpen
+        const upperOpen = (viseme.lipUpperRaise + viseme.jawOpen * 0.3) * intensity * 0.15;
+        if (lips.centerUpper && lipRest.centerUpper) {
+          lips.centerUpper.rotation.y = lipRest.centerUpper.y - upperOpen;
+        }
+        if (lips.upperL && lipRest.upperL) {
+          lips.upperL.rotation.y = lipRest.upperL.y - upperOpen * 0.7;
+        }
+        if (lips.upperR && lipRest.upperR) {
+          lips.upperR.rotation.y = lipRest.upperR.y - upperOpen * 0.7;
+        }
+
+        // Corners: Y for spread, X for pucker
+        const stretchAmount = viseme.lipStretch * intensity * 0.15;
+        const puckerAmount = viseme.lipPucker * intensity * 0.12;
+        if (lips.cornerL && lipRest.cornerL) {
+          lips.cornerL.rotation.y = lipRest.cornerL.y + stretchAmount;
+          lips.cornerL.rotation.x = lipRest.cornerL.x + puckerAmount;
+        }
+        if (lips.cornerR && lipRest.cornerR) {
+          lips.cornerR.rotation.y = lipRest.cornerR.y + stretchAmount;
+          lips.cornerR.rotation.x = lipRest.cornerR.x + puckerAmount;
+        }
+      }
+    } else if (Object.keys(lips).length > 0) {
       if (viseme) {
-        // === VISEME MODE: Drive lips from viseme shape weights ===
-        // Amplitude modulates the overall intensity of the viseme shape
-        const intensity = Math.max(0.3, finalMouth * 1.5); // Minimum 0.3 so shapes are visible even at low amplitude
+        // === BONE-ONLY VISEME MODE: No morph controller, full bone contribution ===
+        // Y-axis drives lip parting (Genesis 9 bone orientations)
+        // Lower lips (rest x≈0.41): +Y opens downward
+        // Upper lips (rest x≈-1.58, z≈3.14): -Y opens upward (flipped 180°)
+        const intensity = Math.max(0.3, finalMouth * 1.5);
 
-        // Jaw open: driven by viseme jawOpen weight, modulated by amplitude
-        // (jaw bone was already set above from amplitude — override with viseme-aware value)
+        // Jaw open: driven by viseme jawOpen weight
         if (jawBoneRef.current && jawRestRotationRef.current) {
           const jawAmount = viseme.jawOpen * intensity * cfg.maxJawRotation * cfg.jawRotationDirection;
           const bone = jawBoneRef.current.bone;
@@ -382,76 +512,91 @@ export function useMouthAnimation(
           }
         }
 
-        // Lower lip: drop amount from viseme
-        const lipLowerDrop = viseme.lipLowerDrop * intensity * 0.1;
+        // Lower lip: +Y to drop open
+        const lowerOpen = (viseme.lipLowerDrop + viseme.jawOpen * 0.5) * intensity * 0.20;
         if (lips.centerLower && lipRest.centerLower) {
-          lips.centerLower.rotation.x = lipRest.centerLower.x + lipLowerDrop;
+          lips.centerLower.rotation.y = lipRest.centerLower.y + lowerOpen;
         }
         if (lips.lowerL && lipRest.lowerL) {
-          lips.lowerL.rotation.x = lipRest.lowerL.x + lipLowerDrop * 0.7;
+          lips.lowerL.rotation.y = lipRest.lowerL.y + lowerOpen * 0.8;
         }
         if (lips.lowerR && lipRest.lowerR) {
-          lips.lowerR.rotation.x = lipRest.lowerR.x + lipLowerDrop * 0.7;
+          lips.lowerR.rotation.y = lipRest.lowerR.y + lowerOpen * 0.8;
         }
 
-        // Upper lip: raise amount from viseme
-        const lipUpperRaise = viseme.lipUpperRaise * intensity * 0.06;
+        // Upper lip: -Y to raise open
+        const upperOpen = (viseme.lipUpperRaise + viseme.jawOpen * 0.3) * intensity * 0.15;
         if (lips.centerUpper && lipRest.centerUpper) {
-          lips.centerUpper.rotation.x = lipRest.centerUpper.x - lipUpperRaise;
+          lips.centerUpper.rotation.y = lipRest.centerUpper.y - upperOpen;
         }
         if (lips.upperL && lipRest.upperL) {
-          lips.upperL.rotation.x = lipRest.upperL.x - lipUpperRaise * 0.6;
+          lips.upperL.rotation.y = lipRest.upperL.y - upperOpen * 0.7;
         }
         if (lips.upperR && lipRest.upperR) {
-          lips.upperR.rotation.x = lipRest.upperR.x - lipUpperRaise * 0.6;
+          lips.upperR.rotation.y = lipRest.upperR.y - upperOpen * 0.7;
         }
 
-        // Lip corners: stretch (spread outward) vs pucker (push forward)
-        // Stretch uses Z rotation (outward), pucker uses Y rotation (forward)
-        const stretchAmount = viseme.lipStretch * intensity * 0.06;
-        const puckerAmount = viseme.lipPucker * intensity * 0.05;
+        // Corners: Y for spread, X for pucker
+        const stretchAmount = viseme.lipStretch * intensity * 0.15;
+        const puckerAmount = viseme.lipPucker * intensity * 0.12;
         if (lips.cornerL && lipRest.cornerL) {
-          lips.cornerL.rotation.z = lipRest.cornerL.z + stretchAmount;
-          lips.cornerL.rotation.y = lipRest.cornerL.y + puckerAmount;
+          lips.cornerL.rotation.y = lipRest.cornerL.y + stretchAmount;
+          lips.cornerL.rotation.x = lipRest.cornerL.x + puckerAmount;
         }
         if (lips.cornerR && lipRest.cornerR) {
-          lips.cornerR.rotation.z = lipRest.cornerR.z - stretchAmount;
-          lips.cornerR.rotation.y = lipRest.cornerR.y - puckerAmount;
+          lips.cornerR.rotation.y = lipRest.cornerR.y + stretchAmount;
+          lips.cornerR.rotation.x = lipRest.cornerR.x + puckerAmount;
         }
       } else {
-        // === AMPLITUDE MODE: Original simple lip animation ===
+        // === AMPLITUDE MODE: Lip bones driven by audio level ===
+        // Y-axis drives lip parting (Genesis 9 bone orientations)
+        // Lower lips (rest x≈0.41): +Y opens downward
+        // Upper lips (rest x≈-1.58, z≈3.14): -Y opens upward (flipped 180°)
 
-        // Lower lip follows jaw opening (rotate downward = positive X)
-        const lipLowerAmount = finalMouth * 0.08;
+        // Lower lip: +Y to drop open proportional to mouth open
+        const lowerOpen = finalMouth * 0.20;
         if (lips.centerLower && lipRest.centerLower) {
-          lips.centerLower.rotation.x = lipRest.centerLower.x + lipLowerAmount;
+          lips.centerLower.rotation.y = lipRest.centerLower.y + lowerOpen;
         }
         if (lips.lowerL && lipRest.lowerL) {
-          lips.lowerL.rotation.x = lipRest.lowerL.x + lipLowerAmount * 0.7;
+          lips.lowerL.rotation.y = lipRest.lowerL.y + lowerOpen * 0.8;
         }
         if (lips.lowerR && lipRest.lowerR) {
-          lips.lowerR.rotation.x = lipRest.lowerR.x + lipLowerAmount * 0.7;
+          lips.lowerR.rotation.y = lipRest.lowerR.y + lowerOpen * 0.8;
         }
 
-        // Upper lip lifts slightly during speech (negative X = upward)
-        const lipUpperAmount = finalMouth * 0.03;
+        // Upper lip: -Y to raise open during speech
+        const upperOpen = finalMouth * 0.15;
         if (lips.centerUpper && lipRest.centerUpper) {
-          lips.centerUpper.rotation.x = lipRest.centerUpper.x - lipUpperAmount;
+          lips.centerUpper.rotation.y = lipRest.centerUpper.y - upperOpen;
         }
         if (lips.upperL && lipRest.upperL) {
-          lips.upperL.rotation.x = lipRest.upperL.x - lipUpperAmount * 0.6;
+          lips.upperL.rotation.y = lipRest.upperL.y - upperOpen * 0.7;
         }
         if (lips.upperR && lipRest.upperR) {
-          lips.upperR.rotation.x = lipRest.upperR.x - lipUpperAmount * 0.6;
+          lips.upperR.rotation.y = lipRest.upperR.y - upperOpen * 0.7;
         }
 
-        // Lip corners spread slightly when mouth opens wide (positive Z = outward)
-        const lipCornerAmount = finalMouth * 0.04;
+        // Lip corners: Y for spread when mouth opens wide
+        const cornerSpread = finalMouth * 0.12;
         if (lips.cornerL && lipRest.cornerL) {
-          lips.cornerL.rotation.z = lipRest.cornerL.z + lipCornerAmount;
+          lips.cornerL.rotation.y = lipRest.cornerL.y + cornerSpread;
         }
         if (lips.cornerR && lipRest.cornerR) {
-          lips.cornerR.rotation.z = lipRest.cornerR.z - lipCornerAmount;
+          lips.cornerR.rotation.y = lipRest.cornerR.y + cornerSpread;
+        }
+
+        // Debug: log lip bone Y rotations during speech (every 60 frames)
+        if (finalMouth > 0.1) {
+          lipDebugCounterRef.current++;
+          if (lipDebugCounterRef.current >= 60) {
+            lipDebugCounterRef.current = 0;
+            const lL = lips.lowerL;
+            const uL = lips.upperL;
+            log.debug(`[MouthAnimation] Lips amplitude: finalMouth=${finalMouth.toFixed(3)}, lowerOpen=${lowerOpen.toFixed(3)}, upperOpen=${upperOpen.toFixed(3)}`);
+            if (lL) log.debug(`[MouthAnimation]   lowerL y: rest=${lipRest.lowerL?.y.toFixed(4)} now=${lL.rotation.y.toFixed(4)}`);
+            if (uL) log.debug(`[MouthAnimation]   upperL y: rest=${lipRest.upperL?.y.toFixed(4)} now=${uL.rotation.y.toFixed(4)}`);
+          }
         }
       }
     }
@@ -492,12 +637,28 @@ export function useMouthAnimation(
     }
   }, []);
 
+  // Set the FACS morph controller
+  const setMorphController = useCallback((controller: FacsMorphController) => {
+    morphControllerRef.current = controller;
+    log.info(`[MouthAnimation] FACS morph controller set (${controller.morphCount} morphs)`);
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       reset();
     };
   }, [reset]);
+
+  // Get lip bone references for debug/testing
+  const getLipBones = useCallback((): LipBoneRefs => {
+    return lipBonesRef.current;
+  }, []);
+
+  // Get lip bone rest poses for debug/testing
+  const getLipRestPoses = useCallback((): LipBoneRestPoses => {
+    return lipRestPosesRef.current;
+  }, []);
 
   return {
     initialize,
@@ -508,6 +669,9 @@ export function useMouthAnimation(
     getAudioContext,
     getMouthDriver,
     reset,
+    setMorphController,
+    getLipBones,
+    getLipRestPoses,
   };
 }
 

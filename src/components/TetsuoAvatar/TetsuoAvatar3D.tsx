@@ -45,6 +45,7 @@ import { useAvatarStore } from "../../stores/avatarStore";
 import { log } from "../../utils/log";
 import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
+import { FacsMorphController, logAllMorphs } from "../../utils/dazMorphMap";
 
 const MODEL_PATH = MODEL_CONFIG.path;
 
@@ -54,35 +55,37 @@ const MODEL_PATH = MODEL_CONFIG.path;
 
 const CONFIG = {
   // Appearance
-  ACCENT_TINT_STRENGTH: 0.3,      // How much accent color affects non-matched materials
-  EMISSIVE_BASE_INTENSITY: 0.6,   // Base eye glow intensity
-  EMISSIVE_VOICE_BOOST: 0.8,      // Additional intensity when speaking
+  ACCENT_TINT_STRENGTH: 0.15,     // How much accent color affects non-matched materials
+  EMISSIVE_BASE_INTENSITY: 0.3,   // Base eye glow intensity
+  EMISSIVE_VOICE_BOOST: 0.5,      // Additional intensity when speaking
 
   // Eye glow animation
   EYE_PULSE_SPEED: 4.0,           // Eye glow pulse speed when speaking
   EYE_IDLE_PULSE_SPEED: 1.5,      // Slower pulse when idle
 
   // Rendering
-  ENABLE_POST_PROCESSING: true,   // Enable bloom, vignette, etc.
+  ENABLE_POST_PROCESSING: false,  // Disabled for maximum clarity
 
   // Post-processing settings
-  BLOOM_INTENSITY: 0.3,           // Subtle bloom for highlights
-  BLOOM_LUMINANCE_THRESHOLD: 0.8, // Only bright areas bloom
-  VIGNETTE_DARKNESS: 0.25,        // Edge darkening (softened from 0.4)
+  BLOOM_INTENSITY: 0.15,          // Very subtle bloom
+  BLOOM_LUMINANCE_THRESHOLD: 0.9, // Only very bright areas bloom
+  VIGNETTE_DARKNESS: 0.3,         // Edge darkening
   VIGNETTE_OFFSET: 0.3,           // Vignette falloff
 
-  // Lighting
-  KEY_LIGHT_INTENSITY: 0.75,      // Main light (softened from 1.0)
+  // Lighting — tuned for untextured (white base-color) materials.
+  // Very conservative values to prevent blowout on white surfaces.
+  KEY_LIGHT_INTENSITY: 0.35,      // Main directional — very low for white materials
   KEY_LIGHT_COLOR: '#fff5e6',
-  FILL_LIGHT_INTENSITY: 0.55,     // Fill (raised from 0.4 to reduce contrast)
-  FILL_LIGHT_COLOR: '#fff8f0',
-  RIM_LIGHT_INTENSITY: 0.25,
+  FILL_LIGHT_INTENSITY: 0.15,     // Fill to reduce contrast
+  FILL_LIGHT_COLOR: '#e8e4f0',    // Slightly cool fill for dimension
+  RIM_LIGHT_INTENSITY: 0.2,       // Edge definition
   RIM_LIGHT_COLOR: '#ffe8d6',
-  FACE_SPOT_INTENSITY: 0.2,       // Face spotlight (reduced from 0.5)
+  FACE_SPOT_INTENSITY: 0.08,      // Very subtle face spotlight
   FACE_SPOT_COLOR: '#fff5e6',
-  AMBIENT_INTENSITY: 0.35,
-  ENVIRONMENT_PRESET: 'apartment' as const, // Softer than "studio"
-  TONE_MAPPING_EXPOSURE: 1.15,    // Slightly brighter (raised from 1.05)
+  AMBIENT_INTENSITY: 0.05,        // Minimal ambient — IBL provides fill
+  ENVIRONMENT_PRESET: 'apartment' as const,
+  ENVIRONMENT_INTENSITY: 0.15,    // Low IBL — main source of diffuse light
+  TONE_MAPPING_EXPOSURE: 0.55,    // Aggressive reduction to prevent blowout
 
   // Debug
   DEBUG_ANIMATIONS: false,        // Log animation state (enable for troubleshooting)
@@ -301,6 +304,7 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
   const animationsInitializedRef = useRef(false);
+  const morphControllerRef = useRef<FacsMorphController | null>(null);
 
   // ========================================
   // Animation System
@@ -312,7 +316,7 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     forceTest: -1,
     useJawBone: true,  // Drive jaw bone directly from mouth animation
     jawBoneContribution: 0.5,     // Half contribution for natural look
-    maxJawRotation: 0.3,          // ~17 degrees - natural jaw range
+    maxJawRotation: 0.15,         // ~8.5 degrees — subtle natural speech range
     jawRotationDirection: -1,     // Genesis 9: negative X opens jaw
   });
 
@@ -369,9 +373,71 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   // Standard clone(true) breaks SkinnedMesh: cloned meshes still reference
   // the ORIGINAL bones, so bone rotations have no visual effect.
   const clonedScene = useMemo(() => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // MORPH TARGET DIAGNOSTIC — check original gltf.scene BEFORE cloning
+    // ═══════════════════════════════════════════════════════════════════════
+    log.info("[MorphDiag] ════ ORIGINAL gltf.scene morph target audit ════");
+    let totalMorphMeshes = 0;
+    gltf.scene.traverse((obj: THREE.Object3D) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+
+      const geom = mesh.geometry;
+      const hasMorphAttrs = geom?.morphAttributes && Object.keys(geom.morphAttributes).length > 0;
+      const hasDict = mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length > 0;
+      const hasInfluences = mesh.morphTargetInfluences && mesh.morphTargetInfluences.length > 0;
+      const isSkinned = !!(mesh as THREE.SkinnedMesh).isSkinnedMesh;
+      const isGroup = !!(obj as THREE.Group).isGroup;
+
+      if (hasMorphAttrs || hasDict || hasInfluences) {
+        totalMorphMeshes++;
+        const morphAttrKeys = geom?.morphAttributes ? Object.keys(geom.morphAttributes) : [];
+        const morphAttrCounts = morphAttrKeys.map(k => `${k}:${(geom.morphAttributes as Record<string, THREE.BufferAttribute[]>)[k]?.length ?? 0}`);
+        const dictSize = mesh.morphTargetDictionary ? Object.keys(mesh.morphTargetDictionary).length : 0;
+        const infLen = mesh.morphTargetInfluences?.length ?? 0;
+        log.info(`[MorphDiag]   "${mesh.name}" skinned=${isSkinned} morphAttrs=[${morphAttrCounts.join(', ')}] dict=${dictSize} influences=${infLen}`);
+        if (mesh.morphTargetDictionary) {
+          const sampleKeys = Object.keys(mesh.morphTargetDictionary).slice(0, 3);
+          log.info(`[MorphDiag]     Sample morph keys: ${sampleKeys.join(', ')}${dictSize > 3 ? ` ... (+${dictSize - 3})` : ''}`);
+        }
+      } else if (/genesis9/i.test(mesh.name)) {
+        // Always log Genesis9 meshes even if no morphs found
+        const morphAttrKeys = geom?.morphAttributes ? Object.keys(geom.morphAttributes) : [];
+        log.warn(`[MorphDiag]   "${mesh.name}" skinned=${isSkinned} NO MORPHS — morphAttrKeys=[${morphAttrKeys.join(',')}] dict=${mesh.morphTargetDictionary ? 'exists(empty)' : 'null'} influences=${mesh.morphTargetInfluences?.length ?? 'null'}`);
+      }
+    });
+    log.info(`[MorphDiag] Total meshes with morphs in original scene: ${totalMorphMeshes}`);
+    log.info("[MorphDiag] ════ END original scene audit ════");
+
     // SkeletonUtils.clone properly rebinds skeleton bones to the cloned scene.
     // Standard clone(true) leaves SkinnedMesh referencing original bones.
     const clone = SkeletonUtils.clone(gltf.scene);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MORPH TARGET DIAGNOSTIC — check CLONED scene AFTER cloning
+    // ═══════════════════════════════════════════════════════════════════════
+    log.info("[MorphDiag] ════ CLONED scene morph target audit ════");
+    let cloneMorphMeshes = 0;
+    clone.traverse((obj: THREE.Object3D) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+
+      const geom = mesh.geometry;
+      const hasMorphAttrs = geom?.morphAttributes && Object.keys(geom.morphAttributes).length > 0;
+      const hasDict = mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length > 0;
+      const hasInfluences = mesh.morphTargetInfluences && mesh.morphTargetInfluences.length > 0;
+
+      if (hasMorphAttrs || hasDict || hasInfluences) {
+        cloneMorphMeshes++;
+        const dictSize = mesh.morphTargetDictionary ? Object.keys(mesh.morphTargetDictionary).length : 0;
+        const infLen = mesh.morphTargetInfluences?.length ?? 0;
+        log.info(`[MorphDiag]   CLONE "${mesh.name}" dict=${dictSize} influences=${infLen}`);
+      } else if (/genesis9/i.test(mesh.name)) {
+        log.warn(`[MorphDiag]   CLONE "${mesh.name}" NO MORPHS`);
+      }
+    });
+    log.info(`[MorphDiag] Total meshes with morphs in cloned scene: ${cloneMorphMeshes}`);
+    log.info("[MorphDiag] ════ END cloned scene audit ════");
 
     // Diagnostic: log scene root and children transforms to detect baked-in rotation
     const r = gltf.scene.rotation;
@@ -407,6 +473,12 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
         log.info(`[TetsuoAvatar3D] TEMP: Hidden Sketchfab_model (hair)`);
       }
     });
+
+    // Scale model from meters to centimeters.
+    // The GLB is authored in meters (1.70m tall) but the camera system
+    // expects centimeters (170cm tall). Scaling here keeps all downstream
+    // bone offsets and animation amplitudes working in cm-space.
+    clone.scale.setScalar(100);
 
     clone.updateMatrixWorld(true);
 
@@ -601,6 +673,18 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       log.info("[TetsuoAvatar3D] Initializing WiggleBones...");
       wiggleBones.initialize(clonedScene);
 
+      // Initialize FACS morph controller (discovers all morph targets on all meshes)
+      log.info("[TetsuoAvatar3D] Initializing FacsMorphController...");
+      logAllMorphs(clonedScene);
+      const controller = new FacsMorphController(clonedScene);
+      morphControllerRef.current = controller;
+      log.info(`[TetsuoAvatar3D] FacsMorphController: ${controller.morphCount} morphs found — ${controller.availableMorphs.join(', ')}`);
+
+      // Pass morph controller to animation hooks
+      mouthAnimation.setMorphController(controller);
+      expressionSystem.setMorphController(controller);
+      idleAnimation.setMorphController(controller);
+
       animationsInitializedRef.current = true;
 
       // Expose rig API for external control (console, demos)
@@ -683,6 +767,197 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
           log.info(`[RigAPI] Gesture amplitude scale → ${scale}`);
         },
 
+        // Morph controller
+        getMorphs: () => {
+          const ctrl = morphControllerRef.current;
+          if (!ctrl) { console.log('No morph controller'); return []; }
+          const morphs = ctrl.availableMorphs;
+          console.log(`Available FACS morphs (${morphs.length}): ${morphs.join(', ')}`);
+          return morphs;
+        },
+        testMorph: (name: string, value: number) => {
+          const ctrl = morphControllerRef.current;
+          if (!ctrl) { console.log('No morph controller'); return; }
+          log.info(`[RigAPI] testMorph("${name}", ${value})`);
+          ctrl.setMorph(name as Parameters<typeof ctrl.setMorph>[0], value);
+        },
+
+        // Lip bone testing — per-bone per-axis exploration
+        testLipAxis: (boneName: string, axis: string, amount: number) => {
+          const lips = mouthAnimation.getLipBones() as Record<string, THREE.Bone | undefined>;
+          const rest = mouthAnimation.getLipRestPoses() as Record<string, THREE.Euler | undefined>;
+          const bone = lips[boneName];
+          const restPose = rest[boneName];
+          if (!bone || !restPose) {
+            const valid = Object.keys(lips).filter(k => lips[k]).join(', ');
+            console.log(`Bone "${boneName}" not found. Valid: ${valid}`);
+            return;
+          }
+          const ax = axis.toLowerCase() as 'x' | 'y' | 'z';
+          if (!['x', 'y', 'z'].includes(ax)) {
+            console.log('Axis must be "x", "y", or "z"');
+            return;
+          }
+          const restVal = restPose[ax];
+          bone.rotation[ax] = restVal + amount;
+          log.info(`[RigAPI] testLipAxis("${boneName}", "${ax}", ${amount}) — ${bone.name}: rest=${restVal.toFixed(4)} → now=${bone.rotation[ax].toFixed(4)}`);
+          console.log(`${boneName} (${bone.name}) ${ax}: ${restVal.toFixed(4)} → ${bone.rotation[ax].toFixed(4)}. Run rig.resetLips() to restore.`);
+        },
+
+        // Sweep all 3 axes on a single lip bone to find which axis works
+        testLipSweep: (boneName?: string) => {
+          const lips = mouthAnimation.getLipBones() as Record<string, THREE.Bone | undefined>;
+          const rest = mouthAnimation.getLipRestPoses() as Record<string, THREE.Euler | undefined>;
+          const name = boneName || 'lowerL';
+          const bone = lips[name];
+          const restPose = rest[name];
+          if (!bone || !restPose) {
+            const valid = Object.keys(lips).filter(k => lips[k]).join(', ');
+            console.log(`Bone "${name}" not found. Valid: ${valid}`);
+            return;
+          }
+
+          // Also check if this bone is in the skeleton's bones array
+          let foundInSkeleton = false;
+          clonedScene.traverse((obj: THREE.Object3D) => {
+            if ((obj as THREE.SkinnedMesh).isSkinnedMesh) {
+              const sm = obj as THREE.SkinnedMesh;
+              const idx = sm.skeleton.bones.indexOf(bone);
+              if (idx >= 0) {
+                foundInSkeleton = true;
+                log.info(`[RigAPI] ✓ "${bone.name}" found in ${sm.name} skeleton at index ${idx}`);
+              }
+            }
+          });
+          if (!foundInSkeleton) {
+            log.warn(`[RigAPI] ✗ "${bone.name}" NOT found in any skeleton! This bone won't affect the mesh.`);
+          }
+
+          console.log(`\nTesting "${name}" (${bone.name}) — 0.5 rad on each axis, 2s each.`);
+          console.log('Watch the mouth carefully for movement.\n');
+
+          // X axis
+          const testAxis = (ax: 'x' | 'y' | 'z', delay: number) => {
+            setTimeout(() => {
+              bone.rotation.copy(restPose);
+              bone.rotation[ax] = restPose[ax] + 0.5;
+              console.log(`→ ${ax.toUpperCase()} axis: rest=${restPose[ax].toFixed(4)} → ${bone.rotation[ax].toFixed(4)}`);
+            }, delay);
+          };
+
+          testAxis('x', 0);
+          testAxis('y', 2000);
+          testAxis('z', 4000);
+          setTimeout(() => {
+            bone.rotation.copy(restPose);
+            console.log('→ Reset to rest pose. Which axis moved the lip?');
+          }, 6000);
+        },
+
+        // Diagnostic: check if lip bones are in the right skeleton
+        diagLipBones: () => {
+          const lips = mouthAnimation.getLipBones();
+          console.log('\n=== LIP BONE SKELETON DIAGNOSTIC ===');
+
+          // For each lip bone, check which SkinnedMesh skeletons contain it
+          for (const [slot, bone] of Object.entries(lips)) {
+            if (!bone) continue;
+            const meshesContaining: string[] = [];
+            clonedScene.traverse((obj: THREE.Object3D) => {
+              if ((obj as THREE.SkinnedMesh).isSkinnedMesh) {
+                const sm = obj as THREE.SkinnedMesh;
+                const idx = sm.skeleton.bones.indexOf(bone);
+                if (idx >= 0) {
+                  meshesContaining.push(`${sm.name}[${idx}]`);
+                }
+              }
+            });
+            const status = meshesContaining.length > 0 ? '✓' : '✗';
+            console.log(`  ${status} ${slot} (${bone.name}): ${meshesContaining.length > 0 ? meshesContaining.join(', ') : 'NOT IN ANY SKELETON'}`);
+          }
+          console.log('');
+        },
+
+        // Test lip separation using Y axis (Genesis 9 bone orientations)
+        // Lower lips (rest x≈0.41): +Y opens downward
+        // Upper lips (rest x≈-1.58, z≈3.14): -Y opens upward (flipped 180°)
+        testLips: (amount: number = 0.2) => {
+          const lips = mouthAnimation.getLipBones();
+          const rest = mouthAnimation.getLipRestPoses();
+          const boneCount = Object.keys(lips).length;
+          if (boneCount === 0) {
+            console.log('No lip bones found');
+            return;
+          }
+          log.info(`[RigAPI] testLips(${amount}) — Y-axis lip separation on ${boneCount} bones`);
+
+          // Lower lips: +Y to drop open
+          if (lips.centerLower && rest.centerLower) {
+            lips.centerLower.rotation.y = rest.centerLower.y + amount;
+            log.info(`[RigAPI]   centerLower y: ${rest.centerLower.y.toFixed(4)} → ${lips.centerLower.rotation.y.toFixed(4)}`);
+          }
+          if (lips.lowerL && rest.lowerL) {
+            lips.lowerL.rotation.y = rest.lowerL.y + amount;
+            log.info(`[RigAPI]   lowerL y: ${rest.lowerL.y.toFixed(4)} → ${lips.lowerL.rotation.y.toFixed(4)}`);
+          }
+          if (lips.lowerR && rest.lowerR) {
+            lips.lowerR.rotation.y = rest.lowerR.y + amount;
+            log.info(`[RigAPI]   lowerR y: ${rest.lowerR.y.toFixed(4)} → ${lips.lowerR.rotation.y.toFixed(4)}`);
+          }
+
+          // Upper lips: -Y to raise open (opposite direction due to 180° orientation)
+          if (lips.centerUpper && rest.centerUpper) {
+            lips.centerUpper.rotation.y = rest.centerUpper.y - amount;
+            log.info(`[RigAPI]   centerUpper y: ${rest.centerUpper.y.toFixed(4)} → ${lips.centerUpper.rotation.y.toFixed(4)}`);
+          }
+          if (lips.upperL && rest.upperL) {
+            lips.upperL.rotation.y = rest.upperL.y - amount;
+            log.info(`[RigAPI]   upperL y: ${rest.upperL.y.toFixed(4)} → ${lips.upperL.rotation.y.toFixed(4)}`);
+          }
+          if (lips.upperR && rest.upperR) {
+            lips.upperR.rotation.y = rest.upperR.y - amount;
+            log.info(`[RigAPI]   upperR y: ${rest.upperR.y.toFixed(4)} → ${lips.upperR.rotation.y.toFixed(4)}`);
+          }
+
+          // Corners: Y for spread
+          if (lips.cornerL && rest.cornerL) {
+            lips.cornerL.rotation.y = rest.cornerL.y + amount * 0.5;
+          }
+          if (lips.cornerR && rest.cornerR) {
+            lips.cornerR.rotation.y = rest.cornerR.y + amount * 0.5;
+          }
+          console.log(`Lip bones Y-rotated by ±${amount} rad. Run rig.resetLips() to restore.`);
+          console.log('Use rig.testLipAxis(bone, axis, amount) to test individual bones.');
+        },
+        resetLips: () => {
+          const lips = mouthAnimation.getLipBones();
+          const rest = mouthAnimation.getLipRestPoses();
+          for (const [key, bone] of Object.entries(lips)) {
+            if (bone && rest[key]) {
+              bone.rotation.copy(rest[key]);
+            }
+          }
+          log.info('[RigAPI] Lip bones reset to rest pose');
+        },
+        getLipBones: () => {
+          const lips = mouthAnimation.getLipBones();
+          const rest = mouthAnimation.getLipRestPoses();
+          const info: Record<string, { name: string; rot: string; rest: string }> = {};
+          for (const [key, bone] of Object.entries(lips)) {
+            if (bone) {
+              const r = bone.rotation;
+              const rr = rest[key];
+              info[key] = {
+                name: bone.name,
+                rot: `x=${r.x.toFixed(4)} y=${r.y.toFixed(4)} z=${r.z.toFixed(4)}`,
+                rest: rr ? `x=${rr.x.toFixed(4)} y=${rr.y.toFixed(4)} z=${rr.z.toFixed(4)}` : 'N/A',
+              };
+            }
+          }
+          console.table(info);
+          return info;
+        },
+
         // Wiggle bones controls
         toggleWiggle: () => {
           const newState = !wiggleBones.isEnabled();
@@ -715,6 +990,14 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
 ║    Types: beat open point tilt shrug                    ║
 ║  rig.listGestures()      - List available gestures     ║
 ║  rig.setGestureAmplitude(s) - Scale gesture size (1.0) ║
+║  rig.getMorphs()         - List available FACS morphs   ║
+║  rig.testMorph(n, v)     - Set morph name to value 0-1 ║
+║  rig.testLips(amount)    - Test Y-axis lip separation    ║
+║  rig.testLipAxis(b,a,v)  - Test bone on specific axis   ║
+║  rig.testLipSweep(bone)  - Sweep X/Y/Z (2s each)        ║
+║  rig.diagLipBones()      - Check skeleton membership     ║
+║  rig.resetLips()         - Reset lips to rest pose      ║
+║  rig.getLipBones()       - Inspect lip bone state       ║
 ║  rig.toggleWiggle()      - Toggle hair physics on/off  ║
 ║  rig.help()              - Show this help              ║
 ╚════════════════════════════════════════════════════════╝
@@ -893,7 +1176,7 @@ export default function TetsuoAvatar3D({
   const isTransitioning = useAvatarStore((state) => state.isTransitioning);
 
   return (
-    <div style={{ width: 800, height: 900 }}>
+    <div style={{ width: '100%', height: '100%' }}>
       <Canvas
         camera={{
           position: initialPreset.position as [number, number, number],
@@ -906,7 +1189,7 @@ export default function TetsuoAvatar3D({
         dpr={[2, 3]}
         gl={{
           antialias: true,
-          toneMapping: THREE.NeutralToneMapping,
+          toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: CONFIG.TONE_MAPPING_EXPOSURE,
           outputColorSpace: THREE.SRGBColorSpace,
         }}
@@ -949,8 +1232,8 @@ export default function TetsuoAvatar3D({
         {/* Ambient fill */}
         <ambientLight intensity={CONFIG.AMBIENT_INTENSITY} />
 
-        {/* Apartment environment for softer, warmer ambient light */}
-        <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} />
+        {/* Apartment environment for softer, warmer ambient light (intensity scaled down) */}
+        <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} environmentIntensity={CONFIG.ENVIRONMENT_INTENSITY} />
 
         {/* The reactive model */}
         <ReactiveModel appearance={appearance} status={status} />

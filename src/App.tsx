@@ -14,7 +14,6 @@ import { TetsuoAPI } from './api';
 // Components
 import TetsuoAvatar from './components/TetsuoAvatar';
 import AppearanceMenu from './components/AppearanceMenu';
-import GlitchOverlay from './components/GlitchOverlay';
 import ChatPanel from './components/ChatPanel';
 import TitleBar from './components/TitleBar';
 import VoiceButton from './components/VoiceButton';
@@ -59,7 +58,6 @@ function App() {
     setProtocolState,
     messages,
     addMessage,
-    isGlitching,
     setIsGlitching,
     appearance,
     isCustomizeOpen,
@@ -79,6 +77,8 @@ function App() {
   const setCameraMode = useAvatarStore((s) => s.setCameraMode);
 
   const CAMERA_MODES: { mode: CameraMode; label: string }[] = [
+    { mode: 'face', label: 'Face' },
+    { mode: 'bust', label: 'Bust' },
     { mode: 'closeup', label: 'Close-Up' },
     { mode: 'waist', label: 'Waist' },
     { mode: 'full-body', label: 'Full Body' },
@@ -86,7 +86,7 @@ function App() {
   ];
 
   const cycleCameraMode = useCallback(() => {
-    const modes: CameraMode[] = ['closeup', 'waist', 'full-body', 'presentation'];
+    const modes: CameraMode[] = ['face', 'bust', 'closeup', 'waist', 'full-body', 'presentation'];
     const currentIdx = modes.indexOf(currentCameraMode);
     const nextIdx = (currentIdx + 1) % modes.length;
     setCameraMode(modes[nextIdx]);
@@ -338,8 +338,7 @@ function App() {
 
   return (
     <div className="w-full h-full bg-transparent flex flex-col overflow-hidden">
-      {/* Glitch Overlay - Always on top */}
-      <GlitchOverlay active={isGlitching || voiceState === 'processing'} />
+      {/* Glitch Overlay - Disabled for clean rendering */}
 
       {/* Custom Title Bar */}
       <TitleBar />
@@ -349,7 +348,7 @@ function App() {
         {/* Camera Cycle Button */}
         <button
           onClick={cycleCameraMode}
-          className="flex items-center gap-2 px-3 py-2 rounded border bg-cyber-dark/80 border-cyber-light text-holo-silver hover:border-neon-cyan hover:text-neon-cyan transition-all"
+          className="flex items-center gap-2 px-3 py-2 rounded border bg-black/80 border-white/20 text-white/60 hover:border-white/40 hover:text-white transition-all backdrop-blur-sm"
           aria-label="Cycle camera view"
           title={`Camera: ${CAMERA_MODES.find(m => m.mode === currentCameraMode)?.label}`}
         >
@@ -399,30 +398,30 @@ function App() {
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Background Grid */}
-        <div className="absolute inset-0 bg-cyber-grid opacity-30" />
+      {/* Main Content — avatar fills viewport, chat overlays on right */}
+      <div className="flex-1 relative overflow-hidden">
+        {/* Background Grid - Disabled for clean rendering */}
+        {/* <div className="absolute inset-0 bg-cyber-grid opacity-30" /> */}
 
-        {/* Center - Tetsuo Avatar (Main Focus) */}
-        <div className="flex-1 flex items-center justify-center relative">
+        {/* Avatar — fills entire viewport */}
+        <div className="absolute inset-0">
           <TetsuoAvatar
             appearance={appearance}
             status={agentStatus}
           />
-
-          {/* Voice Button - Overlaid at bottom center */}
-          <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2">
-            <VoiceButton
-              voiceState={voiceState}
-              isConnected={isVoiceConnected}
-              onClick={handleVoiceToggle}
-            />
-          </div>
         </div>
 
-        {/* Right Panel - Chat */}
-        <div className="w-96 p-4 flex flex-col gap-4 z-10">
+        {/* Voice Button — bottom center overlay */}
+        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+          <VoiceButton
+            voiceState={voiceState}
+            isConnected={isVoiceConnected}
+            onClick={handleVoiceToggle}
+          />
+        </div>
+
+        {/* Chat Panel — glass overlay on right */}
+        <div className="absolute right-0 top-0 bottom-0 w-[420px] z-30 flex flex-col p-4">
           <ChatPanel
             messages={messages}
             voiceState={voiceState}
@@ -439,8 +438,8 @@ function App() {
         network={agentStatus.network.toUpperCase()}
       />
 
-      {/* Vignette Effect */}
-      <div className="absolute inset-0 pointer-events-none vignette" />
+      {/* Vignette Effect - Disabled for clean rendering */}
+      {/* <div className="absolute inset-0 pointer-events-none vignette" /> */}
     </div>
   );
 }

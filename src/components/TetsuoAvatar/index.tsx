@@ -46,7 +46,7 @@ export interface TetsuoAvatarProps {
  */
 function AvatarLoadingFallback({ appearance }: { appearance: AgentAppearance }) {
   return (
-    <div className="w-[800px] h-[900px] flex flex-col items-center justify-center gap-4">
+    <div className="w-full h-full flex flex-col items-center justify-center gap-4">
       {/* Spinner rings */}
       <div className="relative w-[120px] h-[120px]">
         {/* Outer ring */}
@@ -121,7 +121,7 @@ export default function TetsuoAvatar({
   const shouldUse3D = USE_3D_AVATAR && !has3DError;
 
   return (
-    <div className="relative select-none">
+    <div className="relative select-none w-full h-full">
       {shouldUse3D ? (
         <ErrorBoundary onError={handle3DError} fallback={
           <TetsuoAvatar2D
