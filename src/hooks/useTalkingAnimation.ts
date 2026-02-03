@@ -793,9 +793,10 @@ export function useTalkingAnimation(
           }
 
           startGesture(selectedType);
+          const fired = state.activeGesture;
           log.info(
-            `[GestureFired] type=${selectedType} arm=${state.activeGesture?.arm} ` +
-            `scale=${state.activeGesture?.scale.toFixed(2)} mouthOpen=${state.mouthOpen.toFixed(3)} ` +
+            `[GestureFired] type=${selectedType} arm=${fired?.arm ?? '?'} ` +
+            `scale=${fired?.scale?.toFixed(2) ?? '?'} mouthOpen=${state.mouthOpen.toFixed(3)} ` +
             `sentenceGestures=${state.gesturesThisSentence} total=${state.gestureCount}`
           );
         }
