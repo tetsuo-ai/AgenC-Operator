@@ -47,9 +47,9 @@ export const CAMERA_PRESETS: Record<CameraMode, CameraPreset> = {
     fov: 30,
   },
   'waist': {
-    position: [0, 138, 130],
-    target: [0, 132, 0],
-    fov: 32,
+    position: [0, 130, 155],
+    target: [0, 125, 0],
+    fov: 34,
   },
   'full-body': {
     position: [0, 90, 280],

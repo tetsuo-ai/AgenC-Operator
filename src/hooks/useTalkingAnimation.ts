@@ -65,7 +65,7 @@ const DEFAULT_CONFIG: TalkingAnimationConfig = {
   gestureArmAmount: 0.08,
   gestureForearmAmount: 0.12,
   gestureHandAmount: 0.15,
-  gestureChance: 0.5,
+  gestureChance: 2.5,             // ~2.5 per second base rate (per-frame: 2.5*0.016=0.04 → ~91% in 1s)
 
   shoulderShrugsPerMinute: 4,
   shoulderShrugsAmount: 0.06,
@@ -74,11 +74,11 @@ const DEFAULT_CONFIG: TalkingAnimationConfig = {
   spineSwayAmount: 0.03,
 
   dominantHandBias: 0.7,
-  gestureMinInterval: 0.8,
+  gestureMinInterval: 0.5,        // Reduced from 0.8 — allows faster re-triggering
   dualArmChance: 0.2,
 
-  emphasisThreshold: 0.35,      // Slightly lower threshold for more reactive gestures
-  emphasisGestureBoost: 0.8,
+  emphasisThreshold: 0.2,         // Lowered from 0.35 — fire emphasis on softer speech too
+  emphasisGestureBoost: 1.2,      // Boosted from 0.8 — stronger emphasis response
 };
 
 // ============================================================================
@@ -691,18 +691,19 @@ export function useTalkingAnimation(
     // ========================================
     // Sentence Boundary Detection
     // ========================================
-    // Detect speech pauses (mouthOpen near 0 for >0.4s) to reset gesture counter
-    const isSilent = state.mouthOpen < 0.05;
+    // Detect actual pauses (mouthOpen near 0 for >0.8s) to reset gesture counter.
+    // Threshold is very low — between-word dips often reach 0.01-0.03.
+    const isSilent = state.mouthOpen < 0.02;
     if (isSilent) {
       if (state.inSentence) {
         state.lastSilenceTime = t;
         state.inSentence = false;
       }
-      // Silence > 0.4s = new sentence boundary
-      if (t - state.lastSilenceTime > 0.4 && state.gesturesThisSentence > 0) {
+      // Silence > 0.8s = true sentence boundary (not just between-word gap)
+      if (t - state.lastSilenceTime > 0.8 && state.gesturesThisSentence > 0) {
         state.gesturesThisSentence = 0;
-        // Rest cooldown: no gestures for 0.5s after speech resumes
-        state.restCooldownUntil = t + 0.5;
+        // Brief rest cooldown so first gesture of new sentence doesn't fire instantly
+        state.restCooldownUntil = t + 0.3;
       }
     } else if (!state.inSentence) {
       state.inSentence = true;
@@ -732,6 +733,24 @@ export function useTalkingAnimation(
     // ========================================
     const isEmphasis = state.mouthOpen > config.emphasisThreshold &&
                        state.mouthOpen > state.prevMouthOpen;
+
+    // Diagnostic: log gate conditions every 2s while speaking
+    if (isSpeaking && t - (state as any)._lastGateDiagTime > 2.0) {
+      (state as any)._lastGateDiagTime = t;
+      const timeSinceGesture = t - state.lastGestureEndTime;
+      const pastCooldown = t > state.restCooldownUntil;
+      const intervalOk = timeSinceGesture >= config.gestureMinInterval;
+      const sentenceOk = state.gesturesThisSentence < 2;
+      const chanceVal = (config.gestureChance + (isEmphasis ? config.emphasisGestureBoost : 0)) * delta;
+      log.info(
+        `[GestureDiag] mouthOpen=${state.mouthOpen.toFixed(3)} blend=${blend.toFixed(2)} ` +
+        `active=${!!state.activeGesture} pastCooldown=${pastCooldown} ` +
+        `intervalOk=${intervalOk}(${timeSinceGesture.toFixed(1)}s) ` +
+        `sentenceOk=${sentenceOk}(${state.gesturesThisSentence}/2) ` +
+        `chance/frame=${chanceVal.toFixed(4)} emphasis=${isEmphasis} ` +
+        `inSentence=${state.inSentence} total=${state.gestureCount}`
+      );
+    }
 
     if (!state.activeGesture && t > state.restCooldownUntil) {
       const timeSinceLastGesture = t - state.lastGestureEndTime;
@@ -774,6 +793,11 @@ export function useTalkingAnimation(
           }
 
           startGesture(selectedType);
+          log.info(
+            `[GestureFired] type=${selectedType} arm=${state.activeGesture?.arm} ` +
+            `scale=${state.activeGesture?.scale.toFixed(2)} mouthOpen=${state.mouthOpen.toFixed(3)} ` +
+            `sentenceGestures=${state.gesturesThisSentence} total=${state.gestureCount}`
+          );
         }
       }
     }
