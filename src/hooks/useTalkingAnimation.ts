@@ -793,7 +793,8 @@ export function useTalkingAnimation(
           }
 
           startGesture(selectedType);
-          const fired = state.activeGesture;
+          // Re-read from ref to bypass TS narrowing (startGesture mutated the ref)
+          const fired = stateRef.current.activeGesture;
           log.info(
             `[GestureFired] type=${selectedType} arm=${fired?.arm ?? '?'} ` +
             `scale=${fired?.scale?.toFixed(2) ?? '?'} mouthOpen=${state.mouthOpen.toFixed(3)} ` +
