@@ -37,6 +37,8 @@ export interface SkeletonConfig {
   upperArms: { left: RegExp[]; right: RegExp[] };
   /** Forearm bones */
   forearms: { left: RegExp[]; right: RegExp[] };
+  /** Hand/wrist bones */
+  hands: { left: RegExp[]; right: RegExp[] };
   /** Hip/pelvis bone */
   hips: RegExp[];
   /** Facial expression bones */
@@ -188,6 +190,11 @@ export const GENESIS9_CONFIG: ModelConfig = {
     forearms: {
       left: [/^l_forearm$/i, /^lForearmBend$/i, /^forearm[_]?l$/i],
       right: [/^r_forearm$/i, /^rForearmBend$/i, /^forearm[_]?r$/i],
+    },
+
+    hands: {
+      left: [/^l_hand$/i, /^lHand$/i, /^hand[_]?l$/i],
+      right: [/^r_hand$/i, /^rHand$/i, /^hand[_]?r$/i],
     },
 
     hips: [

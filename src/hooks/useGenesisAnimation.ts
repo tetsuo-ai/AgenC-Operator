@@ -101,6 +101,10 @@ const BONE_PATTERNS: Record<keyof BoneRefs, RegExp[]> = {
   // Forearms
   foreArmL: sk.forearms.left,
   foreArmR: sk.forearms.right,
+
+  // Hands
+  handL: sk.hands.left,
+  handR: sk.hands.right,
 };
 
 // ============================================================================
@@ -129,6 +133,8 @@ interface BoneRefs {
   upperArmR: THREE.Bone | null;
   foreArmL: THREE.Bone | null;
   foreArmR: THREE.Bone | null;
+  handL: THREE.Bone | null;
+  handR: THREE.Bone | null;
 }
 
 interface RestPoses {
@@ -178,6 +184,8 @@ export function useGenesisAnimation(
     upperArmR: null,
     foreArmL: null,
     foreArmR: null,
+    handL: null,
+    handR: null,
   });
 
   const restPosesRef = useRef<RestPoses>({});

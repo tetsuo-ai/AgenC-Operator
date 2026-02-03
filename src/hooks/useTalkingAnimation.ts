@@ -121,8 +121,8 @@ const BONE_PATTERNS: Record<keyof TalkingBoneRefs, RegExp[]> = {
   upperArmR: sk.upperArms.right,
   foreArmL: sk.forearms.left,
   foreArmR: sk.forearms.right,
-  handL: [/^l_hand$/i, /^lHand$/i, /^hand[_]?l$/i],
-  handR: [/^r_hand$/i, /^rHand$/i, /^hand[_]?r$/i],
+  handL: sk.hands.left,
+  handR: sk.hands.right,
   spine: [/^spine1$/i, /^spine$/i],
   spine2: [/^spine2$/i, /^spine3$/i],
   chest: [/^spine4$/i, /^chest$/i],
@@ -132,7 +132,7 @@ const BONE_PATTERNS: Record<keyof TalkingBoneRefs, RegExp[]> = {
 // Gesture Library
 // ============================================================================
 
-type GestureType = 'beat' | 'open' | 'point' | 'tilt' | 'shrug';
+type GestureType = 'beat' | 'emphasis' | 'openPalm' | 'point' | 'thinking' | 'tilt' | 'shrug' | 'wave';
 
 interface GestureDef {
   armMode: 'dominant' | 'both' | 'either';
@@ -177,11 +177,27 @@ function lerpBoneAxis(
   bone.rotation[axis] = THREE.MathUtils.lerp(bone.rotation[axis], target, speed);
 }
 
+/** Sharper envelope for emphasis gestures — quicker attack, shorter hold */
+function emphasisEnvelope(progress: number): number {
+  if (progress < 0.12) {
+    // Very fast attack
+    const t = progress / 0.12;
+    return t * t * t;
+  } else if (progress < 0.35) {
+    return 1.0;
+  } else {
+    // Quick retraction
+    const t = (progress - 0.35) / 0.65;
+    return 1.0 - t * t;
+  }
+}
+
 const GESTURE_LIBRARY: Record<GestureType, GestureDef> = {
+  // Common everyday rhythmic gesture
   beat: {
     armMode: 'dominant',
     durationRange: [0.8, 1.4],
-    weight: 4,
+    weight: 3,
     apply(_progress, envelope, osc, bones, rest, config, arm, lerpSpeed) {
       const amp = envelope;
       if (arm === 'right' || arm === 'both') {
@@ -197,22 +213,53 @@ const GESTURE_LIBRARY: Record<GestureType, GestureDef> = {
     },
   },
 
-  open: {
-    armMode: 'both',
-    durationRange: [1.2, 2.0],
-    weight: 2,
-    apply(_progress, envelope, _osc, bones, rest, config, _arm, lerpSpeed) {
-      const amp = envelope;
-      lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'z', -amp * config.gestureArmAmount * 1.2, lerpSpeed);
-      lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'z', amp * config.gestureArmAmount * 1.2, lerpSpeed);
-      lerpBoneAxis(bones.foreArmR, rest.foreArmR, 'x', amp * config.gestureForearmAmount, lerpSpeed);
-      lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', amp * config.gestureForearmAmount, lerpSpeed);
-      lerpBoneAxis(bones.handR, rest.handR, 'z', -amp * config.gestureHandAmount * 0.5, lerpSpeed);
-      lerpBoneAxis(bones.handL, rest.handL, 'z', amp * config.gestureHandAmount * 0.5, lerpSpeed);
-      lerpBoneAxis(bones.spine2, rest.spine2, 'x', -amp * config.spineSwayAmount * 0.5, lerpSpeed);
+  // Sharp downward beat on stressed words
+  emphasis: {
+    armMode: 'dominant',
+    durationRange: [0.5, 0.9],
+    weight: 3,
+    apply(progress, _envelope, _osc, bones, rest, config, arm, lerpSpeed) {
+      // Use sharper envelope for emphasis
+      const amp = emphasisEnvelope(progress);
+      if (arm === 'right' || arm === 'both') {
+        lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'x', amp * config.gestureArmAmount * 1.4, lerpSpeed);
+        lerpBoneAxis(bones.foreArmR, rest.foreArmR, 'x', amp * config.gestureForearmAmount * 1.2, lerpSpeed);
+        lerpBoneAxis(bones.handR, rest.handR, 'x', amp * config.gestureHandAmount * 1.3, lerpSpeed);
+        lerpBoneAxis(bones.handR, rest.handR, 'z', -amp * config.gestureHandAmount * 0.4, lerpSpeed);
+      }
+      if (arm === 'left' || arm === 'both') {
+        lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'x', amp * config.gestureArmAmount * 1.4, lerpSpeed);
+        lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', amp * config.gestureForearmAmount * 1.2, lerpSpeed);
+        lerpBoneAxis(bones.handL, rest.handL, 'x', amp * config.gestureHandAmount * 1.3, lerpSpeed);
+        lerpBoneAxis(bones.handL, rest.handL, 'z', amp * config.gestureHandAmount * 0.4, lerpSpeed);
+      }
     },
   },
 
+  // Both hands out, palms up — presenting / explaining
+  openPalm: {
+    armMode: 'both',
+    durationRange: [1.2, 2.2],
+    weight: 2,
+    apply(_progress, envelope, _osc, bones, rest, config, _arm, lerpSpeed) {
+      const amp = envelope;
+      // Arms out to sides
+      lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'z', -amp * config.gestureArmAmount * 1.4, lerpSpeed);
+      lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'z', amp * config.gestureArmAmount * 1.4, lerpSpeed);
+      // Forearms raised slightly
+      lerpBoneAxis(bones.foreArmR, rest.foreArmR, 'x', amp * config.gestureForearmAmount * 1.1, lerpSpeed);
+      lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', amp * config.gestureForearmAmount * 1.1, lerpSpeed);
+      // Hands rotated palms-up (supination)
+      lerpBoneAxis(bones.handR, rest.handR, 'z', -amp * config.gestureHandAmount * 0.7, lerpSpeed);
+      lerpBoneAxis(bones.handL, rest.handL, 'z', amp * config.gestureHandAmount * 0.7, lerpSpeed);
+      lerpBoneAxis(bones.handR, rest.handR, 'y', amp * config.gestureHandAmount * 0.3, lerpSpeed);
+      lerpBoneAxis(bones.handL, rest.handL, 'y', -amp * config.gestureHandAmount * 0.3, lerpSpeed);
+      // Spine leans back slightly — "presenting"
+      lerpBoneAxis(bones.spine2, rest.spine2, 'x', -amp * config.spineSwayAmount * 0.6, lerpSpeed);
+    },
+  },
+
+  // Index finger extension toward a direction
   point: {
     armMode: 'dominant',
     durationRange: [1.0, 1.8],
@@ -229,11 +276,55 @@ const GESTURE_LIBRARY: Record<GestureType, GestureDef> = {
         lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', amp * config.gestureForearmAmount * 1.3, lerpSpeed);
         lerpBoneAxis(bones.handL, rest.handL, 'x', amp * config.gestureHandAmount * 0.8, lerpSpeed);
       }
+      // Spine rotates toward pointed direction
       const spineDir = (arm === 'left') ? 1 : -1;
       lerpBoneAxis(bones.spine2, rest.spine2, 'y', amp * config.spineSwayAmount * spineDir, lerpSpeed);
+      lerpBoneAxis(bones.spine, rest.spine, 'y', amp * config.spineSwayAmount * spineDir * 0.4, lerpSpeed);
     },
   },
 
+  // Hand toward chin/face — contemplative
+  thinking: {
+    armMode: 'dominant',
+    durationRange: [1.5, 3.0],
+    weight: 1.5,
+    apply(progress, _envelope, _osc, bones, rest, config, arm, lerpSpeed) {
+      // Custom long-hold envelope: slow rise, long hold, slow drop
+      let amp: number;
+      if (progress < 0.25) {
+        const t = progress / 0.25;
+        amp = t * t; // ease in
+      } else if (progress < 0.65) {
+        amp = 1.0; // long hold
+      } else {
+        const t = (progress - 0.65) / 0.35;
+        amp = 1.0 - t * t; // ease out
+      }
+
+      if (arm === 'right' || arm === 'both') {
+        // Arm raises: upper arm forward+up, forearm bends sharply
+        lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'x', amp * config.gestureArmAmount * 2.0, lerpSpeed);
+        lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'z', -amp * config.gestureArmAmount * 0.8, lerpSpeed);
+        lerpBoneAxis(bones.foreArmR, rest.foreArmR, 'x', -amp * config.gestureForearmAmount * 2.5, lerpSpeed);
+        // Hand tilts inward (toward face)
+        lerpBoneAxis(bones.handR, rest.handR, 'y', amp * config.gestureHandAmount * 0.6, lerpSpeed);
+        lerpBoneAxis(bones.handR, rest.handR, 'x', -amp * config.gestureHandAmount * 0.4, lerpSpeed);
+      }
+      if (arm === 'left' || arm === 'both') {
+        lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'x', amp * config.gestureArmAmount * 2.0, lerpSpeed);
+        lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'z', amp * config.gestureArmAmount * 0.8, lerpSpeed);
+        lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', -amp * config.gestureForearmAmount * 2.5, lerpSpeed);
+        lerpBoneAxis(bones.handL, rest.handL, 'y', -amp * config.gestureHandAmount * 0.6, lerpSpeed);
+        lerpBoneAxis(bones.handL, rest.handL, 'x', -amp * config.gestureHandAmount * 0.4, lerpSpeed);
+      }
+      // Head tilts toward raised hand
+      const headDir = (arm === 'left') ? 1 : -1;
+      lerpBoneAxis(bones.head, rest.head, 'z', amp * config.headTiltAmount * headDir * 0.8, lerpSpeed);
+      lerpBoneAxis(bones.head, rest.head, 'x', amp * config.headNodAmount * 0.5, lerpSpeed);
+    },
+  },
+
+  // Head tilt with spine lean
   tilt: {
     armMode: 'either',
     durationRange: [1.0, 1.6],
@@ -247,6 +338,7 @@ const GESTURE_LIBRARY: Record<GestureType, GestureDef> = {
     },
   },
 
+  // Shoulders up, palms out — "I don't know"
   shrug: {
     armMode: 'both',
     durationRange: [0.6, 1.0],
@@ -257,14 +349,44 @@ const GESTURE_LIBRARY: Record<GestureType, GestureDef> = {
       lerpBoneAxis(bones.shoulderR, rest.shoulderR, 'z', amp * config.shoulderShrugsAmount, lerpSpeed);
       lerpBoneAxis(bones.foreArmR, rest.foreArmR, 'x', amp * config.gestureForearmAmount * 0.6, lerpSpeed);
       lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', amp * config.gestureForearmAmount * 0.6, lerpSpeed);
-      lerpBoneAxis(bones.handR, rest.handR, 'z', -amp * config.gestureHandAmount * 0.6, lerpSpeed);
-      lerpBoneAxis(bones.handL, rest.handL, 'z', amp * config.gestureHandAmount * 0.6, lerpSpeed);
+      // Palms out: hand Z rotation for supination
+      lerpBoneAxis(bones.handR, rest.handR, 'z', -amp * config.gestureHandAmount * 0.8, lerpSpeed);
+      lerpBoneAxis(bones.handL, rest.handL, 'z', amp * config.gestureHandAmount * 0.8, lerpSpeed);
+      lerpBoneAxis(bones.handR, rest.handR, 'y', amp * config.gestureHandAmount * 0.3, lerpSpeed);
+      lerpBoneAxis(bones.handL, rest.handL, 'y', -amp * config.gestureHandAmount * 0.3, lerpSpeed);
       lerpBoneAxis(bones.head, rest.head, 'z', amp * config.headTiltAmount * 0.5, lerpSpeed);
+    },
+  },
+
+  // Greeting wave — hand raised with oscillating wrist
+  wave: {
+    armMode: 'dominant',
+    durationRange: [1.0, 1.5],
+    weight: 0.5,
+    apply(_progress, envelope, _osc, bones, rest, config, arm, lerpSpeed) {
+      const amp = envelope;
+      // Use progress for wave oscillation (3 quick back-and-forth)
+      const waveOsc = Math.sin(_progress * Math.PI * 6) * amp;
+
+      if (arm === 'right' || arm === 'both') {
+        // Arm raises high
+        lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'x', amp * config.gestureArmAmount * 1.8, lerpSpeed);
+        lerpBoneAxis(bones.upperArmR, rest.upperArmR, 'z', -amp * config.gestureArmAmount * 1.5, lerpSpeed);
+        lerpBoneAxis(bones.foreArmR, rest.foreArmR, 'x', -amp * config.gestureForearmAmount * 1.5, lerpSpeed);
+        // Wave motion on hand Z
+        lerpBoneAxis(bones.handR, rest.handR, 'z', waveOsc * config.gestureHandAmount * 1.2, lerpSpeed);
+      }
+      if (arm === 'left' || arm === 'both') {
+        lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'x', amp * config.gestureArmAmount * 1.8, lerpSpeed);
+        lerpBoneAxis(bones.upperArmL, rest.upperArmL, 'z', amp * config.gestureArmAmount * 1.5, lerpSpeed);
+        lerpBoneAxis(bones.foreArmL, rest.foreArmL, 'x', -amp * config.gestureForearmAmount * 1.5, lerpSpeed);
+        lerpBoneAxis(bones.handL, rest.handL, 'z', waveOsc * config.gestureHandAmount * 1.2, lerpSpeed);
+      }
     },
   },
 };
 
-const GESTURE_TYPES: GestureType[] = ['beat', 'open', 'point', 'tilt', 'shrug'];
+const GESTURE_TYPES: GestureType[] = ['beat', 'emphasis', 'openPalm', 'point', 'thinking', 'tilt', 'shrug', 'wave'];
 
 function pickRandomGesture(): GestureType {
   const totalWeight = GESTURE_TYPES.reduce((sum, g) => sum + GESTURE_LIBRARY[g].weight, 0);
@@ -285,6 +407,7 @@ interface ActiveGesture {
   startTime: number;
   duration: number;
   arm: 'left' | 'right' | 'both';
+  scale: number; // 0.6–1.4 varied sizing
 }
 
 interface TalkingAnimationState {
@@ -306,6 +429,16 @@ interface TalkingAnimationState {
   headTiltCurrent: number;
   lastHeadDirectionChange: number;
   headDirection: number;      // -1 or 1 — which way head is leaning
+  // Sentence-level limiting
+  gesturesThisSentence: number;
+  lastSilenceTime: number;       // last time mouthOpen was near 0
+  inSentence: boolean;           // currently in a speech phrase
+  restCooldownUntil: number;     // no gestures until this time (post-pause cooldown)
+  // Session tracking for wave gesture
+  sessionSpeechStartTime: number; // when speaking first started this session
+  hasWaved: boolean;              // only wave once per session
+  // Sustained loudness tracking for openPalm preference
+  sustainedLoudStart: number;     // when mouthOpen exceeded threshold continuously
   // Debug
   debugLogTime: number;
   gestureCount: number;
@@ -352,6 +485,13 @@ export function useTalkingAnimation(
     headTiltCurrent: 0,
     lastHeadDirectionChange: 0,
     headDirection: 1,
+    gesturesThisSentence: 0,
+    lastSilenceTime: 0,
+    inSentence: false,
+    restCooldownUntil: 0,
+    sessionSpeechStartTime: -1,
+    hasWaved: false,
+    sustainedLoudStart: -1,
     debugLogTime: 0,
     gestureCount: 0,
   });
@@ -431,19 +571,26 @@ export function useTalkingAnimation(
   // Start gesture
   // ============================================================================
 
-  const startGesture = useCallback((type: GestureType) => {
+  const startGesture = useCallback((type: GestureType, scaleOverride?: number) => {
     const state = stateRef.current;
     const def = GESTURE_LIBRARY[type];
     const [minDur, maxDur] = def.durationRange;
     const duration = minDur + Math.random() * (maxDur - minDur);
+
+    // Varied gesture sizing: 0.6 to 1.4, biased by current mouth amplitude
+    const baseScale = 0.6 + Math.random() * 0.8;
+    const ampBoost = Math.min(0.3, state.mouthOpen * 0.4); // louder = bigger
+    const scale = scaleOverride ?? Math.min(1.4, baseScale + ampBoost);
 
     state.activeGesture = {
       type,
       startTime: state.time,
       duration,
       arm: resolveArm(def),
+      scale,
     };
     state.gestureCount++;
+    state.gesturesThisSentence++;
   }, [resolveArm]);
 
   // ============================================================================
@@ -542,22 +689,91 @@ export function useTalkingAnimation(
     }
 
     // ========================================
-    // Amplitude-Driven Gesture Triggering
+    // Sentence Boundary Detection
+    // ========================================
+    // Detect speech pauses (mouthOpen near 0 for >0.4s) to reset gesture counter
+    const isSilent = state.mouthOpen < 0.05;
+    if (isSilent) {
+      if (state.inSentence) {
+        state.lastSilenceTime = t;
+        state.inSentence = false;
+      }
+      // Silence > 0.4s = new sentence boundary
+      if (t - state.lastSilenceTime > 0.4 && state.gesturesThisSentence > 0) {
+        state.gesturesThisSentence = 0;
+        // Rest cooldown: no gestures for 0.5s after speech resumes
+        state.restCooldownUntil = t + 0.5;
+      }
+    } else if (!state.inSentence) {
+      state.inSentence = true;
+    }
+
+    // Track session speech start (for wave gesture)
+    if (isSpeaking && state.sessionSpeechStartTime < 0) {
+      state.sessionSpeechStartTime = t;
+    }
+    if (!isSpeaking) {
+      // Reset session after silence > 10s
+      if (t - state.lastSilenceTime > 10) {
+        state.sessionSpeechStartTime = -1;
+        state.hasWaved = false;
+      }
+    }
+
+    // Track sustained loudness (for openPalm preference)
+    if (state.mouthOpen > 0.3) {
+      if (state.sustainedLoudStart < 0) state.sustainedLoudStart = t;
+    } else {
+      state.sustainedLoudStart = -1;
+    }
+
+    // ========================================
+    // Smart Gesture Triggering
     // ========================================
     const isEmphasis = state.mouthOpen > config.emphasisThreshold &&
                        state.mouthOpen > state.prevMouthOpen;
 
-    if (!state.activeGesture) {
+    if (!state.activeGesture && t > state.restCooldownUntil) {
       const timeSinceLastGesture = t - state.lastGestureEndTime;
+      const canGesture = timeSinceLastGesture >= config.gestureMinInterval &&
+                         state.gesturesThisSentence < 2; // max 2 per sentence
 
-      if (timeSinceLastGesture >= config.gestureMinInterval) {
+      if (canGesture) {
         let chance = config.gestureChance * delta;
         if (isEmphasis) {
           chance += config.emphasisGestureBoost * delta;
         }
 
         if (Math.random() < chance) {
-          startGesture(pickRandomGesture());
+          // Smart gesture selection based on context
+          let selectedType: GestureType;
+
+          // Wave at start of speech session (first 3 seconds, once per session)
+          if (!state.hasWaved && state.sessionSpeechStartTime > 0 &&
+              t - state.sessionSpeechStartTime < 3 && Math.random() < 0.4) {
+            selectedType = 'wave';
+            state.hasWaved = true;
+          }
+          // Emphasis peaks → prefer emphasis gesture
+          else if (isEmphasis && Math.random() < 0.6) {
+            selectedType = 'emphasis';
+          }
+          // Sustained loud speech (>2s) → prefer openPalm
+          else if (state.sustainedLoudStart > 0 &&
+                   t - state.sustainedLoudStart > 2 && Math.random() < 0.4) {
+            selectedType = 'openPalm';
+          }
+          // After silence gap (>1s) without speech resuming → thinking
+          else if (!state.inSentence && t - state.lastSilenceTime > 1 &&
+                   isSpeaking && Math.random() < 0.3) {
+            selectedType = 'thinking';
+          }
+          // Otherwise: weighted random from full library
+          else {
+            selectedType = pickRandomGesture();
+          }
+
+          startGesture(selectedType);
         }
       }
     }
@@ -574,7 +790,8 @@ export function useTalkingAnimation(
         state.activeGesture = null;
         state.lastGestureEndTime = t;
       } else {
-        const envelope = gestureEnvelope(progress) * scale * blend;
+        // Apply gesture scale for varied sizing
+        const envelope = gestureEnvelope(progress) * scale * blend * gesture.scale;
         const osc = Math.sin(t * config.gestureSpeed * Math.PI * 2);
 
         def.apply(progress, envelope, osc, bones, rest, config, gesture.arm, lerpSpeed);
@@ -630,8 +847,9 @@ export function useTalkingAnimation(
       log.debug(
         `[TalkingAnimation] speaking=${isSpeaking}, blend=${blend.toFixed(2)}, ` +
         `gesture=${state.activeGesture?.type ?? 'none'} ` +
-        `(arm=${state.activeGesture?.arm ?? '-'}), ` +
+        `(arm=${state.activeGesture?.arm ?? '-'}, scale=${state.activeGesture?.scale.toFixed(2) ?? '-'}), ` +
         `mouthOpen=${state.mouthOpen.toFixed(2)}, ` +
+        `sentenceGestures=${state.gesturesThisSentence}, ` +
         `totalGestures=${state.gestureCount}`
       );
     }

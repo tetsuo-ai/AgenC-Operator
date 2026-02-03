@@ -35,23 +35,25 @@ export type PoseName = 'idle' | 'thinking' | 'excited' | 'attentive';
 // ============================================================================
 
 export const POSE_PRESETS: Record<PoseName, PosePreset> = {
-  /** Relaxed contrapposto — weight shifted, natural S-curve, slight head tilt */
+  /** Relaxed contrapposto — weight shifted, natural S-curve, asymmetric arms */
   idle: {
     name: 'idle',
     bones: {
-      pelvis:     { z: 0.03 },                   // weight shifted right
-      spine1:     { z: -0.015 },                  // S-curve counter
-      spine2:     { z: -0.01 },
-      spine3:     { x: 0.01 },                    // slight forward lean
-      spine4:     { x: 0.01 },
-      shoulderL:  { x: 0.02, z: -0.02 },
-      shoulderR:  { x: 0.02, z: 0.01 },
-      upperArmL:  { x: 0.05, z: 0.03 },
-      upperArmR:  { x: 0.05, z: -0.03 },
-      foreArmL:   { x: -0.15 },                   // natural elbow bend
-      foreArmR:   { x: -0.15 },
-      neck1:      { x: 0.01, z: 0.01 },
-      head:       { x: 0.02, z: 0.02 },           // slight tilt
+      pelvis:     { z: 0.04, y: 0.02 },           // weight shift right + slight hip rotation
+      spine1:     { z: -0.02, x: 0.005 },          // S-curve counter
+      spine2:     { z: -0.015 },                    // continuing S-curve
+      spine3:     { x: 0.015 },                     // forward lean (sternum area)
+      spine4:     { x: 0.012 },                     // chest slightly forward
+      shoulderL:  { x: 0.03, z: -0.03 },            // left shoulder forward + down
+      shoulderR:  { x: 0.02, z: 0.015 },            // right shoulder slightly back
+      upperArmL:  { x: 0.08, z: 0.05 },             // left arm hangs relaxed
+      upperArmR:  { x: 0.06, z: -0.04 },            // right arm slightly tighter
+      foreArmL:   { x: -0.25, y: 0.08 },            // deeper elbow bend + forearm rotation
+      foreArmR:   { x: -0.18, y: -0.05 },           // less bend (asymmetry)
+      handL:      { x: -0.06, y: 0.04, z: 0.03 },  // slight wrist flex + pronation
+      handR:      { x: -0.04, y: -0.03, z: -0.02 }, // slight wrist flex + supination
+      neck1:      { x: 0.015, z: 0.015 },           // slight forward + tilt
+      head:       { x: 0.025, z: 0.025 },           // head slightly forward and tilted
     },
     transitionDuration: 0.8,
   },

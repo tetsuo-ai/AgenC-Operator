@@ -388,7 +388,6 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       const hasDict = mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length > 0;
       const hasInfluences = mesh.morphTargetInfluences && mesh.morphTargetInfluences.length > 0;
       const isSkinned = !!(mesh as THREE.SkinnedMesh).isSkinnedMesh;
-      const isGroup = !!(obj as THREE.Group).isGroup;
 
       if (hasMorphAttrs || hasDict || hasInfluences) {
         totalMorphMeshes++;
@@ -1175,7 +1174,6 @@ export default function TetsuoAvatar3D({
   // Get initial camera preset from store
   const initialPreset = useAvatarStore((state) => state.currentPreset);
   const isTransitioning = useAvatarStore((state) => state.isTransitioning);
-  const orbitEnabled = useAvatarStore((state) => state.orbitEnabled);
   const renderQuality = useAvatarStore((state) => state.renderQuality);
   const qc = QUALITY_PRESETS[renderQuality];
 

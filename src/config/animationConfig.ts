@@ -106,6 +106,17 @@ export const GESTURE = {
 } as const;
 
 // ============================================================================
+// Idle Hand Drift (wrist micro-movement at rest)
+// ============================================================================
+
+export const IDLE_HANDS = {
+  driftSpeed: 0.05,            // Very slow wrist drift cycle
+  driftAmount: 0.02,           // Rotation amplitude per axis (radians)
+  pronateDrift: 0.015,         // Pronation/supination drift amplitude
+  lerpRate: 0.02,              // Smoothing rate — very gradual
+} as const;
+
+// ============================================================================
 // Facial Expressions
 // ============================================================================
 

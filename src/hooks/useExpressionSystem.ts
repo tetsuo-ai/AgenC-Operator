@@ -664,10 +664,11 @@ export function useExpressionSystem(
       morphCtrl.setMorph('cheekSquintLeft', eyeSquintAmount);
       morphCtrl.setMorph('cheekSquintRight', eyeSquintAmount);
 
-      // Eye widen on emphasis (very subtle upper eyelid raise)
+      // Eye widen on emphasis — approximate via reducing blink value (opening eyes wider)
+      // No eyeWide morph exists on this model, so use negative brow-down as a subtle substitute
       if (eyeWidenAmount > 0.01) {
-        morphCtrl.setMorph('eyeWideLeft', Math.min(0.2, eyeWidenAmount));
-        morphCtrl.setMorph('eyeWideRight', Math.min(0.2, eyeWidenAmount));
+        morphCtrl.setMorph('browInnerUpLeft', Math.min(0.15, eyeWidenAmount * 0.5));
+        morphCtrl.setMorph('browInnerUpRight', Math.min(0.15, eyeWidenAmount * 0.5));
       }
     }
 
