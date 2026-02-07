@@ -615,7 +615,7 @@ export function useTalkingAnimation(
     if ((state as any)._frameCount === undefined) (state as any)._frameCount = 0;
     (state as any)._frameCount++;
     if ((state as any)._frameCount % 120 === 0) {
-      log.info(`[GestureEntry] mouthOpen=${state.mouthOpen.toFixed(3)} blend=${blend.toFixed(2)} isSpeaking=${isSpeaking} t=${t.toFixed(1)}`);
+      log.info(`[GestureEntry] mouthOpen=${state.mouthOpen.toFixed(3)} blend=${state.speakingBlend.toFixed(2)} isSpeaking=${isSpeaking} t=${t.toFixed(1)}`);
     }
 
     // ========================================
