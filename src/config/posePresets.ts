@@ -19,6 +19,8 @@ export interface BoneOffset {
   x?: number;
   y?: number;
   z?: number;
+  /** If true, values are absolute rotations, not offsets added to rest pose */
+  absolute?: boolean;
 }
 
 export interface PosePreset {
@@ -46,12 +48,19 @@ export const POSE_PRESETS: Record<PoseName, PosePreset> = {
       spine4:     { x: 0.012 },                     // chest slightly forward
       shoulderL:  { x: 0.03, z: -0.03 },            // left shoulder forward + down
       shoulderR:  { x: 0.02, z: 0.015 },            // right shoulder slightly back
-      upperArmL:  { x: 0.08, z: 0.05 },             // left arm hangs relaxed
-      upperArmR:  { x: 0.06, z: -0.04 },            // right arm slightly tighter
-      foreArmL:   { x: -0.25, y: 0.08 },            // deeper elbow bend + forearm rotation
-      foreArmR:   { x: -0.18, y: -0.05 },           // less bend (asymmetry)
-      handL:      { x: -0.06, y: 0.04, z: 0.03 },  // slight wrist flex + pronation
-      handR:      { x: -0.04, y: -0.03, z: -0.02 }, // slight wrist flex + supination
+      // Upper arms: ABSOLUTE rotations for full control
+      // X: -PI/2 (-1.57) = straight down from shoulder
+      // Y: controls arm twist (palms inward vs forward) - original was ~0.814/-0.814
+      upperArmL:  { x: -1.45, y: 1.96, z: 0, absolute: true },   // slightly outward from down + 112° twist
+      upperArmR:  { x: 1.45, y: -1.96, z: 0, absolute: true },  // slightly outward from down + 112° twist (mirrored)
+      // Forearm: ABSOLUTE rotations to override complex base pose
+      // Base pose has foreArmL: (-2.480, 1.461, 2.590), foreArmR: (2.480, -1.461, 2.590)
+      // Set to near-zero with slight bend for natural hang - adjust based on hand Y position
+      foreArmL:   { x: 0, y: 0, z: 0, absolute: true },  // TEST: zero out, check hand Y
+      foreArmR:   { x: 0, y: 0, z: 0, absolute: true },  // TEST: zero out, check hand Y
+      // Hands: palms facing inward toward thighs
+      handL:      { x: -0.05, z: 0.02 },            // slight wrist flex, palm inward
+      handR:      { x: -0.05, z: -0.02 },           // mirrored: same flex, palm inward
       neck1:      { x: 0.015, z: 0.015 },           // slight forward + tilt
       head:       { x: 0.025, z: 0.025 },           // head slightly forward and tilted
     },

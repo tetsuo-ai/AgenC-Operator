@@ -20,7 +20,7 @@ import * as THREE from 'three';
 import { stripMorphPrefix } from '../utils/glbInspector';
 import { log } from '../utils/log';
 import { MODEL_CONFIG } from '../config/modelConfig';
-import { BREATHING, SWAY, MICRO, BLINK, IDLE_HANDS } from '../config/animationConfig';
+import { BREATHING, SWAY, MICRO, BLINK } from '../config/animationConfig';
 import { FacsMorphController } from '../utils/dazMorphMap';
 
 // ============================================================================
@@ -459,44 +459,15 @@ export function useIdleAnimation(
     }
 
     // ========================================
-    // Arm Asymmetry + Micro-Movement
+    // Arm Animation DISABLED
     // ========================================
-    // Left arm more relaxed than right — visible asymmetry like a real person
-    if (!isSpeaking) {
-      const armDrift = Math.sin(t * 0.07) * 0.01; // Slow drift, larger amplitude
-      const armDrift2 = Math.sin(t * 0.05 + 1.3) * 0.008; // Second out-of-phase drift
-
-      if (bones.upperArmL && rest.upperArmL) {
-        bones.upperArmL.rotation.z = rest.upperArmL.z + 0.04 + armDrift;
-      }
-      if (bones.upperArmR && rest.upperArmR) {
-        bones.upperArmR.rotation.z = rest.upperArmR.z - 0.025 - armDrift * 0.5;
-      }
-      if (bones.forearmL && rest.forearmL) {
-        bones.forearmL.rotation.y = rest.forearmL.y + 0.04 + armDrift * 0.8;
-        bones.forearmL.rotation.x = rest.forearmL.x + armDrift2 * 0.5;
-      }
-      if (bones.forearmR && rest.forearmR) {
-        bones.forearmR.rotation.y = rest.forearmR.y - 0.02 - armDrift * 0.4;
-        bones.forearmR.rotation.x = rest.forearmR.x + armDrift2 * 0.3;
-      }
-
-      // Hand/wrist idle drift — slow, organic wrist movement
-      const handDriftX = Math.sin(t * IDLE_HANDS.driftSpeed * Math.PI * 2) * IDLE_HANDS.driftAmount;
-      const handDriftZ = Math.sin(t * IDLE_HANDS.driftSpeed * 0.7 * Math.PI * 2 + 0.9) * IDLE_HANDS.driftAmount * 0.7;
-      const handPronate = Math.sin(t * IDLE_HANDS.driftSpeed * 0.5 * Math.PI * 2 + 2.1) * IDLE_HANDS.pronateDrift;
-
-      if (bones.handL && rest.handL) {
-        bones.handL.rotation.x = rest.handL.x + handDriftX;
-        bones.handL.rotation.y = rest.handL.y + handPronate;
-        bones.handL.rotation.z = rest.handL.z + handDriftZ;
-      }
-      if (bones.handR && rest.handR) {
-        bones.handR.rotation.x = rest.handR.x + handDriftX * 0.8;
-        bones.handR.rotation.y = rest.handR.y - handPronate * 0.7;
-        bones.handR.rotation.z = rest.handR.z - handDriftZ * 0.6;
-      }
-    }
+    // IMPORTANT: Arm rotations are now controlled by useGenesisAnimation's idle pose
+    // and useTalkingAnimation's gestures. Do NOT touch arm bones here or it will
+    // overwrite the idle pose and put arms back in T-pose.
+    //
+    // TODO: Re-enable subtle arm drift once we have a shared rest pose system
+    // that captures poses AFTER useGenesisAnimation applies idle corrections.
+    // ========================================
 
     // ========================================
     // Head Sway + Micro-Movements

@@ -610,6 +610,15 @@ export function useTalkingAnimation(
     const t = state.time;
 
     // ========================================
+    // Entry-point Debug Logging (every 2 seconds)
+    // ========================================
+    if ((state as any)._frameCount === undefined) (state as any)._frameCount = 0;
+    (state as any)._frameCount++;
+    if ((state as any)._frameCount % 120 === 0) {
+      log.info(`[GestureEntry] mouthOpen=${state.mouthOpen.toFixed(3)} blend=${blend.toFixed(2)} isSpeaking=${isSpeaking} t=${t.toFixed(1)}`);
+    }
+
+    // ========================================
     // Speaking Blend (smooth idle↔talking ramp)
     // ========================================
     // ~300ms ramp up, ~400ms ramp down — never snaps
@@ -752,6 +761,15 @@ export function useTalkingAnimation(
       );
     }
 
+    // ========================================
+    // TEMPORARY: Force-trigger test (every 3s while speaking)
+    // Remove this block after debugging is complete
+    // ========================================
+    if (isSpeaking && !state.activeGesture && (t - state.lastGestureEndTime) > 3.0) {
+      log.info(`[GestureForce] Forcing 'beat' gesture for debug — arms should move now!`);
+      startGesture('beat');
+    }
+
     if (!state.activeGesture && t > state.restCooldownUntil) {
       const timeSinceLastGesture = t - state.lastGestureEndTime;
       const canGesture = timeSinceLastGesture >= config.gestureMinInterval &&
@@ -840,16 +858,18 @@ export function useTalkingAnimation(
     // ========================================
     // Return-to-rest when blend is fading out (not speaking)
     // ========================================
+    // NOTE: Do NOT include arm/hand bones here! They use useGenesisAnimation's
+    // idle pose, not useTalkingAnimation's rest poses (which are T-pose).
+    // Only reset head/neck/spine/shoulders which are safe.
     if (!isSpeaking && blend > 0.01) {
       const restLerp = delta * 2.5;
       const boneKeys: (keyof TalkingBoneRefs)[] = [
         'neck1', 'neck2',
-        'upperArmL', 'upperArmR',
-        'foreArmL', 'foreArmR',
-        'handL', 'handR',
         'spine', 'spine2', 'chest',
         'shoulderL', 'shoulderR',
         'head',
+        // ARM BONES EXCLUDED: 'upperArmL', 'upperArmR', 'foreArmL', 'foreArmR', 'handL', 'handR'
+        // These stay in idle pose from useGenesisAnimation
       ];
 
       for (const key of boneKeys) {

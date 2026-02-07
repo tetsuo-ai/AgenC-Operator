@@ -308,16 +308,54 @@ export function useGenesisAnimation(
         const bone = bones[boneName as keyof BoneRefs];
         if (!bone || !offsets) continue;
 
-        if (offsets.x) bone.rotation.x += offsets.x;
-        if (offsets.y) bone.rotation.y += offsets.y;
-        if (offsets.z) bone.rotation.z += offsets.z;
+        const beforeX = bone.rotation.x;
+        const beforeY = bone.rotation.y;
+        const beforeZ = bone.rotation.z;
+
+        // If absolute flag is set, SET rotation directly instead of adding offset
+        if (offsets.absolute) {
+          if (offsets.x !== undefined) bone.rotation.x = offsets.x;
+          if (offsets.y !== undefined) bone.rotation.y = offsets.y;
+          if (offsets.z !== undefined) bone.rotation.z = offsets.z;
+        } else {
+          if (offsets.x) bone.rotation.x += offsets.x;
+          if (offsets.y) bone.rotation.y += offsets.y;
+          if (offsets.z) bone.rotation.z += offsets.z;
+        }
 
         // Re-capture as new rest pose
         restPosesRef.current[boneName] = bone.rotation.clone();
         appliedCount++;
+
+        // Log arm bone rotations for debugging
+        if (boneName.includes('Arm') || boneName.includes('hand') || boneName.includes('Hand')) {
+          log.info(`[GenesisAnimation] ${boneName}: before(${beforeX.toFixed(3)}, ${beforeY.toFixed(3)}, ${beforeZ.toFixed(3)}) -> after(${bone.rotation.x.toFixed(3)}, ${bone.rotation.y.toFixed(3)}, ${bone.rotation.z.toFixed(3)})`);
+        }
       }
 
       log.info(`[GenesisAnimation] Idle pose applied to ${appliedCount} bones`);
+
+      // TEMPORARY DEBUG: Log final arm positions after all idle pose offsets
+      if (bones.upperArmL && bones.foreArmL) {
+        log.info(`[GenesisAnimation] FINAL upperArmL: x=${bones.upperArmL.rotation.x.toFixed(3)} y=${bones.upperArmL.rotation.y.toFixed(3)} z=${bones.upperArmL.rotation.z.toFixed(3)}`);
+        log.info(`[GenesisAnimation] FINAL foreArmL:  x=${bones.foreArmL.rotation.x.toFixed(3)} y=${bones.foreArmL.rotation.y.toFixed(3)} z=${bones.foreArmL.rotation.z.toFixed(3)}`);
+      }
+      if (bones.upperArmR && bones.foreArmR) {
+        log.info(`[GenesisAnimation] FINAL upperArmR: x=${bones.upperArmR.rotation.x.toFixed(3)} y=${bones.upperArmR.rotation.y.toFixed(3)} z=${bones.upperArmR.rotation.z.toFixed(3)}`);
+        log.info(`[GenesisAnimation] FINAL foreArmR:  x=${bones.foreArmR.rotation.x.toFixed(3)} y=${bones.foreArmR.rotation.y.toFixed(3)} z=${bones.foreArmR.rotation.z.toFixed(3)}`);
+      }
+
+      // Log hand world positions to verify Y coordinate (target: 70-80 hip level)
+      if (bones.handL) {
+        const handLWorldPos = new THREE.Vector3();
+        bones.handL.getWorldPosition(handLWorldPos);
+        log.info(`[GenesisAnimation] HAND-L world pos: y=${handLWorldPos.y.toFixed(1)} (target: 70-80)`);
+      }
+      if (bones.handR) {
+        const handRWorldPos = new THREE.Vector3();
+        bones.handR.getWorldPosition(handRWorldPos);
+        log.info(`[GenesisAnimation] HAND-R world pos: y=${handRWorldPos.y.toFixed(1)} (target: 70-80)`);
+      }
     }
 
     // ========================================================================
