@@ -32,7 +32,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # HTTP client for API calls
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { workspace = true }
 
 
 # Environment variable loading
@@ -53,6 +53,12 @@ keyring = "2"
 
 # Open browser for OAuth
 open = "5"
+
+# Hashing (description hash, proof hash for MWA unsigned tx building)
+sha2 = "0.10"
+
+# Transaction serialization (Solana wire format for MWA)
+bincode = "1"
 
 [features]
 default = ["custom-protocol"]

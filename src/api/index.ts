@@ -137,10 +137,14 @@ export const MobileWalletAPI = {
   /**
    * Build an unsigned transaction for MWA signing.
    * Returns serialized bytes that the mobile wallet will sign.
+   * @param intentJson - JSON string with { action, params } matching VoiceIntent
+   * @param walletAddress - base58 address of the MWA-connected wallet (fee payer)
    */
-  buildUnsignedTransaction(intentJson: string): Promise<number[]> {
-    return invoke<AsyncResult<number[]>>('build_unsigned_transaction', { intentJson })
-      .then(unwrapResult);
+  buildUnsignedTransaction(intentJson: string, walletAddress: string): Promise<number[]> {
+    return invoke<AsyncResult<number[]>>('build_unsigned_transaction', {
+      intentJson,
+      walletAddress,
+    }).then(unwrapResult);
   },
 };
 

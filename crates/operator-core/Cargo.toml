@@ -27,12 +27,12 @@ reqwest = { workspace = true }
 solana-sdk = { workspace = true }
 solana-client = { workspace = true }
 
-# Audio (local voice processing)
-cpal = { workspace = true }
-rodio = { workspace = true }
+# Audio (local voice processing) — gated behind "native-audio" feature for mobile builds
+cpal = { workspace = true, optional = true }
+rodio = { workspace = true, optional = true }
 
-# Local Whisper ASR for offline fallback
-whisper-rs = { workspace = true }
+# Local Whisper ASR for offline fallback — gated behind "native-audio"
+whisper-rs = { workspace = true, optional = true }
 
 # WebSocket for external voice API
 tokio-tungstenite = { workspace = true }
@@ -78,3 +78,7 @@ tiny_http = "0.12"
 sha2 = "0.10"
 url = "2.5"
 urlencoding = "2.1"
+
+[features]
+default = ["native-audio"]
+native-audio = ["dep:cpal", "dep:rodio", "dep:whisper-rs"]

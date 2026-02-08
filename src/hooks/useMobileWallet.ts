@@ -15,6 +15,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { isMobile } from './usePlatform';
+import { MobileWalletAPI } from '../api';
 import type { WalletInfo } from '../types';
 
 // MWA types — imported dynamically to avoid bundling on desktop
@@ -65,7 +66,6 @@ export function useMobileWallet() {
 
     // Dynamic import to avoid bundling react-native deps on desktop
     const { transact } = await import('@solana-mobile/mobile-wallet-adapter-protocol');
-    const { Connection, LAMPORTS_PER_SOL } = await import('@solana/web3.js');
 
     let walletInfo: WalletInfo = { address: '', balance_sol: 0, is_connected: false };
 
@@ -78,14 +78,10 @@ export function useMobileWallet() {
       const address = result.accounts[0]?.address;
       if (!address) throw new Error('No accounts returned from wallet');
 
-      // Fetch balance
+      // Fetch balance via Tauri backend (uses configured RPC URL)
       let balance = 0;
       try {
-        const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-        const { PublicKey } = await import('@solana/web3.js');
-        const pubkey = new PublicKey(address);
-        const lamports = await conn.getBalance(pubkey);
-        balance = lamports / LAMPORTS_PER_SOL;
+        balance = await MobileWalletAPI.getBalanceByAddress(address);
       } catch (e) {
         console.warn('[MWA] Balance fetch failed, continuing:', e);
       }
@@ -220,10 +216,8 @@ export function useMobileWallet() {
     if (!addr) return;
 
     try {
-      const { Connection, PublicKey, LAMPORTS_PER_SOL } = await import('@solana/web3.js');
-      const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-      const lamports = await conn.getBalance(new PublicKey(addr));
-      setState(prev => ({ ...prev, balanceSol: lamports / LAMPORTS_PER_SOL }));
+      const balance = await MobileWalletAPI.getBalanceByAddress(addr);
+      setState(prev => ({ ...prev, balanceSol: balance }));
     } catch (e) {
       console.warn('[MWA] Balance refresh failed:', e);
     }

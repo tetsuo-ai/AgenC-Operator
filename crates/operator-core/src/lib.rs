@@ -20,6 +20,7 @@ pub mod policy_gate;
 pub mod solana_exec;
 pub mod transaction_retry;
 pub mod types;
+#[cfg(feature = "native-audio")]
 pub mod voice_local;
 
 // Re-export main types for convenience
@@ -34,7 +35,8 @@ pub use db::{
 // Solana executor
 pub use solana_exec::SolanaExecutor;
 
-// Voice processing
+// Voice processing (only available with native audio support)
+#[cfg(feature = "native-audio")]
 pub use voice_local::LocalVoiceProcessor;
 
 // Policy gate

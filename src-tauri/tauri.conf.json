@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Tetsuo",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.agenc.tetsuo",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -32,12 +32,12 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "connect-src": "'self' wss://api.x.ai https://*.solana.com https://*.helius-rpc.com ws://localhost:49200 wss://localhost:49200",
+        "connect-src": "'self' wss://api.x.ai https://*.solana.com https://*.helius-rpc.com ws://localhost:49200 wss://localhost:49200 https://fonts.googleapis.com https://fonts.gstatic.com",
         "script-src": "'self' 'unsafe-inline'",
-        "style-src": "'self' 'unsafe-inline'",
+        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
         "img-src": "'self' data: blob:",
         "media-src": "'self' blob:",
-        "font-src": "'self' data:"
+        "font-src": "'self' data: https://fonts.gstatic.com"
       },
       "dangerousDisableAssetCspModification": false
     },
@@ -52,9 +52,9 @@
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/256x256.png",
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "category": "Finance",
     "shortDescription": "Cyberpunk voice operator for AgenC Solana protocol",

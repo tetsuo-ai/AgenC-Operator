@@ -210,11 +210,21 @@ fn extract_name_fact(content: &str) -> Option<String> {
     for (pattern, offset) in patterns {
         if let Some(pos) = lower.find(pattern) {
             let rest = &content[pos + offset..];
-            let name: String = rest
-                .chars()
-                .take_while(|c| c.is_alphabetic() || *c == ' ')
-                .collect();
-            let name = name.trim();
+            // Extract name: take first word plus any subsequent capitalized words
+            let mut words = Vec::new();
+            for word in rest.split_whitespace() {
+                let first_char = word.chars().next().unwrap_or(' ');
+                if words.is_empty() {
+                    let clean: String = word.chars().take_while(|c| c.is_alphabetic()).collect();
+                    if !clean.is_empty() { words.push(clean); }
+                } else if first_char.is_uppercase() {
+                    let clean: String = word.chars().take_while(|c| c.is_alphabetic()).collect();
+                    if !clean.is_empty() { words.push(clean); }
+                } else {
+                    break;
+                }
+            }
+            let name = words.join(" ");
             if !name.is_empty() && name.len() < 50 {
                 return Some(format!("User's name is {}", name));
             }

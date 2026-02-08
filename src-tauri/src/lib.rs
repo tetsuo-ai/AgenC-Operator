@@ -1603,39 +1603,40 @@ async fn create_task(
     let executor = Arc::clone(&state.executor);
     let db = Arc::clone(&state.db);
 
-    let handle = tokio::spawn(async move {
-        let exec = executor.read().await;
-        let mut params = serde_json::json!({
-            "description": description,
-            "reward_sol": reward_sol,
-        });
-        if let Some(skr) = reward_skr {
-            params["reward_skr"] = serde_json::json!(skr);
-        }
-        if let Some(dl) = deadline {
-            params["deadline_hours"] = serde_json::json!(dl);
-        }
-        let result = exec.execute_intent(&VoiceIntent {
-            action: operator_core::IntentAction::CreateTask,
-            params,
-            raw_transcript: None,
-        }).await?;
+    let handle: tokio::task::JoinHandle<Result<ExecutionResult, anyhow::Error>> =
+        tokio::spawn(async move {
+            let exec = executor.read().await;
+            let mut params = serde_json::json!({
+                "description": description,
+                "reward_sol": reward_sol,
+            });
+            if let Some(skr) = reward_skr {
+                params["reward_skr"] = serde_json::json!(skr);
+            }
+            if let Some(dl) = deadline {
+                params["deadline_hours"] = serde_json::json!(dl);
+            }
+            let result = exec.execute_intent(&VoiceIntent {
+                action: operator_core::IntentAction::CreateTask,
+                params,
+                raw_transcript: None,
+            }).await?;
 
-        // Persist to local DB
-        if result.success {
-            if let Some(ref data) = result.data {
-                if let Ok(task) = serde_json::from_value::<AgencTask>(data.clone()) {
-                    let guard = db.read().await;
-                    if let Some(ref db) = *guard {
-                        let record = agenc_task_to_record(&task);
-                        let _ = db.upsert_task(&record);
+            // Persist to local DB
+            if result.success {
+                if let Some(ref data) = result.data {
+                    if let Ok(task) = serde_json::from_value::<AgencTask>(data.clone()) {
+                        let guard = db.read().await;
+                        if let Some(ref db) = *guard {
+                            let record = agenc_task_to_record(&task);
+                            let _ = db.store_task(&record);
+                        }
                     }
                 }
             }
-        }
 
-        Ok(result)
-    });
+            Ok(result)
+        });
 
     match handle.await {
         Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
@@ -3225,12 +3226,197 @@ async fn get_wallet_balance_by_address(
 #[tauri::command]
 async fn build_unsigned_transaction(
     intent_json: String,
-    _state: State<'_, AppState>,
+    wallet_address: String,
+    state: State<'_, AppState>,
 ) -> Result<AsyncResult<Vec<u8>>, String> {
-    // Phase 2 will implement real AgenC program instruction building here.
-    // For now, return an error indicating it's not yet implemented.
-    debug!("build_unsigned_transaction called with: {}", &intent_json[..intent_json.len().min(100)]);
-    Ok(AsyncResult::err("Transaction building not yet implemented — coming in Phase 2 (AgenC program integration)".to_string()))
+    use operator_core::agenc_program::{
+        build_create_task_ix, build_claim_task_ix, build_complete_task_ix,
+        build_skr_escrow_deposit_ix, derive_task_pda, fetch_task_by_id,
+        display_to_skr_tokens,
+    };
+    use operator_core::{CreateTaskParams, ClaimTaskParams, CompleteTaskParams};
+    use sha2::{Sha256, Digest};
+    use solana_sdk::message::Message;
+    use solana_sdk::transaction::Transaction;
+
+    debug!("build_unsigned_transaction for wallet {} intent: {}",
+           wallet_address, &intent_json[..intent_json.len().min(100)]);
+
+    // Parse wallet address
+    let payer = match Pubkey::from_str(&wallet_address) {
+        Ok(pk) => pk,
+        Err(e) => return Ok(AsyncResult::err(format!("Invalid wallet address: {}", e))),
+    };
+
+    // Parse intent
+    let intent: VoiceIntent = match serde_json::from_str(&intent_json) {
+        Ok(i) => i,
+        Err(e) => return Ok(AsyncResult::err(format!("Invalid intent JSON: {}", e))),
+    };
+
+    // Build instructions based on action
+    let instructions = match intent.action {
+        IntentAction::CreateTask => {
+            let parsed: CreateTaskParams = match serde_json::from_value(intent.params) {
+                Ok(p) => p,
+                Err(e) => return Ok(AsyncResult::err(format!("Invalid create task params: {}", e))),
+            };
+
+            let reward_lamports = (parsed.reward_sol * 1_000_000_000.0) as u64;
+            let task_id_num = chrono::Utc::now().timestamp_millis() as u64;
+            let description_hash: [u8; 32] = Sha256::digest(parsed.description.as_bytes()).into();
+            let deadline = parsed.deadline_hours.map(|h|
+                chrono::Utc::now().timestamp() + (h as i64 * 3600)
+            ).unwrap_or(0);
+
+            let create_ix = build_create_task_ix(
+                task_id_num, &payer, description_hash, reward_lamports, deadline, 0,
+            );
+            let mut ixs = vec![create_ix];
+
+            // Add SKR escrow deposit if SKR reward specified
+            if let Some(skr_amount) = parsed.reward_skr {
+                if skr_amount > 0.0 {
+                    let (task_pda, _) = derive_task_pda(task_id_num);
+                    let deposit_ixs = build_skr_escrow_deposit_ix(
+                        &payer, &task_pda, display_to_skr_tokens(skr_amount),
+                    );
+                    ixs.extend(deposit_ixs);
+                }
+            }
+            ixs
+        }
+
+        IntentAction::ClaimTask => {
+            let parsed: ClaimTaskParams = match serde_json::from_value(intent.params) {
+                Ok(p) => p,
+                Err(e) => return Ok(AsyncResult::err(format!("Invalid claim task params: {}", e))),
+            };
+
+            let task_pda = if let Ok(id) = parsed.task_id.parse::<u64>() {
+                derive_task_pda(id).0
+            } else {
+                match Pubkey::from_str(&parsed.task_id) {
+                    Ok(pk) => pk,
+                    Err(_) => return Ok(AsyncResult::err("Invalid task ID".to_string())),
+                }
+            };
+
+            let agent_id: [u8; 32] = payer.to_bytes();
+            vec![build_claim_task_ix(&task_pda, &payer, agent_id)]
+        }
+
+        IntentAction::CompleteTask => {
+            let parsed: CompleteTaskParams = match serde_json::from_value(intent.params) {
+                Ok(p) => p,
+                Err(e) => return Ok(AsyncResult::err(format!("Invalid complete task params: {}", e))),
+            };
+
+            let (task_pda, task_id_num) = if let Ok(id) = parsed.task_id.parse::<u64>() {
+                (derive_task_pda(id).0, Some(id))
+            } else {
+                match Pubkey::from_str(&parsed.task_id) {
+                    Ok(pk) => (pk, None),
+                    Err(_) => return Ok(AsyncResult::err("Invalid task ID".to_string())),
+                }
+            };
+
+            // Check on-chain task for SKR reward
+            let has_skr = if let Some(id) = task_id_num {
+                let config = state.config.read().await;
+                let rpc_url = config.rpc_url.clone();
+                drop(config);
+                let rpc = solana_client::nonblocking::rpc_client::RpcClient::new(rpc_url);
+                match fetch_task_by_id(&rpc, id).await {
+                    Ok(Some(task)) => task.reward_skr_tokens > 0,
+                    _ => false,
+                }
+            } else {
+                false
+            };
+
+            let timestamp = chrono::Utc::now().timestamp() as u64;
+            let mut hasher = Sha256::new();
+            hasher.update(task_pda.as_ref());
+            hasher.update(payer.as_ref());
+            hasher.update(&timestamp.to_le_bytes());
+            let proof_hash: [u8; 32] = hasher.finalize().into();
+
+            vec![build_complete_task_ix(&task_pda, &payer, proof_hash, None, has_skr)]
+        }
+
+        IntentAction::CancelTask => {
+            // Cancel uses the same PDA derivation; on-chain program verifies creator
+            let task_id: String = intent.params.get("task_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+
+            if task_id.is_empty() {
+                return Ok(AsyncResult::err("Missing task_id for cancel".to_string()));
+            }
+
+            let task_pda = if let Ok(id) = task_id.parse::<u64>() {
+                derive_task_pda(id).0
+            } else {
+                match Pubkey::from_str(&task_id) {
+                    Ok(pk) => pk,
+                    Err(_) => return Ok(AsyncResult::err("Invalid task ID".to_string())),
+                }
+            };
+
+            // cancel_task instruction uses same discriminator pattern
+            let disc = operator_core::agenc_program::instruction_discriminator("cancel_task");
+            let data = disc.to_vec();
+            let (escrow_pda, _) = operator_core::agenc_program::derive_escrow_pda(&task_pda);
+
+            vec![solana_sdk::instruction::Instruction {
+                program_id: operator_core::agenc_program::program_id(),
+                accounts: vec![
+                    solana_sdk::instruction::AccountMeta::new(task_pda, false),
+                    solana_sdk::instruction::AccountMeta::new(escrow_pda, false),
+                    solana_sdk::instruction::AccountMeta::new(payer, true),
+                    solana_sdk::instruction::AccountMeta::new_readonly(
+                        solana_sdk::system_program::id(), false,
+                    ),
+                ],
+                data,
+            }]
+        }
+
+        _ => {
+            return Ok(AsyncResult::err(format!(
+                "Action {:?} does not produce an on-chain transaction", intent.action
+            )));
+        }
+    };
+
+    // Get recent blockhash
+    let config = state.config.read().await;
+    let rpc_url = config.rpc_url.clone();
+    drop(config);
+
+    let rpc = solana_client::nonblocking::rpc_client::RpcClient::new(rpc_url);
+    let blockhash = match rpc.get_latest_blockhash().await {
+        Ok(bh) => bh,
+        Err(e) => return Ok(AsyncResult::err(format!("Failed to get blockhash: {}", e))),
+    };
+
+    // Build unsigned transaction with blockhash
+    let ix_count = instructions.len();
+    let mut message = Message::new(&instructions, Some(&payer));
+    message.recent_blockhash = blockhash;
+    let tx = Transaction::new_unsigned(message);
+
+    // Serialize with bincode (standard Solana wire format)
+    let tx_bytes = match bincode::serialize(&tx) {
+        Ok(bytes) => bytes,
+        Err(e) => return Ok(AsyncResult::err(format!("Failed to serialize transaction: {}", e))),
+    };
+
+    info!("Built unsigned transaction: {} bytes, {} instructions", tx_bytes.len(), ix_count);
+
+    Ok(AsyncResult::ok(tx_bytes))
 }
 
 // ============================================================================
