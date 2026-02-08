@@ -3029,6 +3029,51 @@ async fn db_get_current_session(
 }
 
 // ============================================================================
+// Mobile Wallet Adapter Support
+// ============================================================================
+
+/// Get wallet balance by address — used by mobile MWA path where there's
+/// no local keypair. Frontend provides the address from MWA authorization.
+#[tauri::command]
+async fn get_wallet_balance_by_address(
+    address: String,
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<f64>, String> {
+    let config = state.config.read().await;
+    let rpc_url = config.rpc_url.clone();
+    drop(config);
+
+    let result = tokio::spawn(async move {
+        let client = solana_client::nonblocking::rpc_client::RpcClient::new(rpc_url);
+        let pubkey = Pubkey::from_str(&address)
+            .map_err(|e| format!("Invalid address: {}", e))?;
+        let lamports = client.get_balance(&pubkey).await
+            .map_err(|e| format!("RPC error: {}", e))?;
+        Ok::<f64, String>(lamports as f64 / 1_000_000_000.0)
+    }).await.map_err(|e| format!("Task join error: {}", e))?;
+
+    match result {
+        Ok(balance) => Ok(AsyncResult::ok(balance)),
+        Err(e) => Ok(AsyncResult::err(e)),
+    }
+}
+
+/// Build an unsigned transaction for a given intent. Mobile path: frontend
+/// gets the unsigned bytes, passes them to MWA for signing, then sends.
+/// This reuses the same instruction builders as the desktop execute_intent path
+/// but stops before signing.
+#[tauri::command]
+async fn build_unsigned_transaction(
+    intent_json: String,
+    _state: State<'_, AppState>,
+) -> Result<AsyncResult<Vec<u8>>, String> {
+    // Phase 2 will implement real AgenC program instruction building here.
+    // For now, return an error indicating it's not yet implemented.
+    debug!("build_unsigned_transaction called with: {}", &intent_json[..intent_json.len().min(100)]);
+    Ok(AsyncResult::err("Transaction building not yet implemented — coming in Phase 2 (AgenC program integration)".to_string()))
+}
+
+// ============================================================================
 // Application Setup
 // ============================================================================
 
@@ -3268,6 +3313,9 @@ pub fn run() {
             db_stats,
             db_get_session,
             db_get_current_session,
+            // Mobile Wallet Adapter support
+            get_wallet_balance_by_address,
+            build_unsigned_transaction,
             // Debug
             frontend_log,
         ])

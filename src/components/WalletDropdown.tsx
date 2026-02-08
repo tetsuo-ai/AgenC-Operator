@@ -10,18 +10,26 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { WalletInfo } from '../types';
 import { TwitterConnectCompact } from './TwitterConnect';
+import { isMobile } from '../hooks/usePlatform';
 
 interface WalletDropdownProps {
   wallet: WalletInfo | null;
   onConnect?: () => void;
   onDisconnect?: () => void;
+  /** MWA connect handler for mobile */
+  onMobileConnect?: () => void;
+  /** MWA disconnect handler for mobile */
+  onMobileDisconnect?: () => void;
 }
 
 export default function WalletDropdown({
   wallet,
   onConnect,
   onDisconnect,
+  onMobileConnect,
+  onMobileDisconnect,
 }: WalletDropdownProps) {
+  const mobile = isMobile();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -136,7 +144,8 @@ export default function WalletDropdown({
 
                 <button
                   onClick={() => {
-                    onDisconnect?.();
+                    if (mobile) onMobileDisconnect?.();
+                    else onDisconnect?.();
                     setIsOpen(false);
                   }}
                   className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition-colors"
@@ -155,12 +164,13 @@ export default function WalletDropdown({
 
                 <button
                   onClick={() => {
-                    onConnect?.();
+                    if (mobile) onMobileConnect?.();
+                    else onConnect?.();
                     setIsOpen(false);
                   }}
                   className="w-full px-3 py-2 text-left text-xs text-white/80 hover:bg-white/10 transition-colors"
                 >
-                  Connect Wallet
+                  {mobile ? 'Connect Mobile Wallet' : 'Load Keypair File'}
                 </button>
               </>
             )}

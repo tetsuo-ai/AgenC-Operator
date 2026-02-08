@@ -27,6 +27,7 @@ import type { Tab } from './components/BottomNav';
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
 import { isMobile } from './hooks/usePlatform';
+import { useMobileWallet } from './hooks/useMobileWallet';
 import { useAppStore } from './hooks/useAppStore';
 import { useAvatarStore } from './stores/avatarStore';
 import { getGlobalVisemeDriver } from './hooks/useVisemeDriver';
@@ -80,6 +81,9 @@ function App() {
   // Mobile navigation state
   const [mobileTab, setMobileTab] = useState<Tab>('chat');
   const mobile = isMobile();
+
+  // Mobile Wallet Adapter (MWA) — only active on Android
+  const mobileWallet = useMobileWallet();
 
   // Camera state
   const currentCameraMode = useAvatarStore((s) => s.currentMode);
@@ -189,16 +193,23 @@ function App() {
    * Never blocks the main thread or voice pipeline
    */
   const pollWalletNonBlocking = useCallback(() => {
-    TetsuoAPI.wallet.getWalletInfoNonBlocking(
-      (info: WalletInfo) => {
-        setWallet(info);
-      },
-      (err: Error) => {
-        console.warn('[Poll] Wallet fetch failed:', err.message);
-        // Don't update state on error - keep stale data
-      }
-    );
-  }, [setWallet]);
+    if (mobile && mobileWallet.isConnected) {
+      // On mobile: refresh balance via web3.js directly
+      mobileWallet.refreshBalance().then(() => {
+        setWallet(mobileWallet.toWalletInfo());
+      }).catch(() => {});
+    } else {
+      // On desktop: poll via Tauri IPC
+      TetsuoAPI.wallet.getWalletInfoNonBlocking(
+        (info: WalletInfo) => {
+          setWallet(info);
+        },
+        (err: Error) => {
+          console.warn('[Poll] Wallet fetch failed:', err.message);
+        }
+      );
+    }
+  }, [mobile, mobileWallet, setWallet]);
 
   /**
    * Poll protocol state - fire and forget with callback
@@ -326,6 +337,36 @@ function App() {
   }, []);
 
   // ============================================================================
+  // Mobile Wallet Handlers
+  // ============================================================================
+
+  const handleMobileWalletConnect = useCallback(async () => {
+    try {
+      const info = await mobileWallet.connect();
+      setWallet(info);
+      addMessage({
+        id: `wallet-${Date.now()}`,
+        role: 'system',
+        content: `Wallet connected: ${info.address.slice(0, 4)}...${info.address.slice(-4)}`,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      console.error('[MWA] Connect failed:', err);
+      addMessage({
+        id: `wallet-err-${Date.now()}`,
+        role: 'system',
+        content: `Wallet connection failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        timestamp: Date.now(),
+      });
+    }
+  }, [mobileWallet, setWallet, addMessage]);
+
+  const handleMobileWalletDisconnect = useCallback(() => {
+    mobileWallet.disconnect();
+    setWallet({ address: '', balance_sol: 0, is_connected: false });
+  }, [mobileWallet, setWallet]);
+
+  // ============================================================================
   // Voice Control
   // ============================================================================
 
@@ -386,7 +427,11 @@ function App() {
           onToggle={toggleCustomize}
         />
         {/* Wallet Dropdown */}
-        <WalletDropdown wallet={wallet} />
+        <WalletDropdown
+          wallet={wallet}
+          onMobileConnect={handleMobileWalletConnect}
+          onMobileDisconnect={handleMobileWalletDisconnect}
+        />
       </div>
 
       {/* HUD Panel Overlay (toggle with H) */}

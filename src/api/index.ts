@@ -117,6 +117,34 @@ export const WalletAPI = {
 };
 
 // ============================================================================
+// Mobile Wallet Adapter API
+// ============================================================================
+
+export const MobileWalletAPI = {
+  /**
+   * Get wallet balance by address (no local keypair needed).
+   * Used by mobile MWA path where frontend provides the address.
+   */
+  getBalanceByAddress(address: string): Promise<number> {
+    return invoke<AsyncResult<number>>('get_wallet_balance_by_address', { address })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.warn('[API] getBalanceByAddress failed:', err);
+        return 0;
+      });
+  },
+
+  /**
+   * Build an unsigned transaction for MWA signing.
+   * Returns serialized bytes that the mobile wallet will sign.
+   */
+  buildUnsignedTransaction(intentJson: string): Promise<number[]> {
+    return invoke<AsyncResult<number[]>>('build_unsigned_transaction', { intentJson })
+      .then(unwrapResult);
+  },
+};
+
+// ============================================================================
 // Intent Execution API (Non-Blocking Chain Transactions)
 // ============================================================================
 
@@ -1155,6 +1183,7 @@ export const DatabaseAPI = {
 
 export const TetsuoAPI = {
   wallet: WalletAPI,
+  mobileWallet: MobileWalletAPI,
   intent: IntentAPI,
   protocol: ProtocolAPI,
   policy: PolicyAPI,
