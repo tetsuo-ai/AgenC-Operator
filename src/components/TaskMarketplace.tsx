@@ -10,42 +10,72 @@
  * ============================================================================
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TetsuoAPI } from '../api';
 import type { AgencTask, TaskStatus, WalletInfo } from '../types';
 import { lamportsToSol, skrTokensToDisplay } from '../types';
+import { useNotificationStore } from '../stores/notificationStore';
 
 interface TaskMarketplaceProps {
   wallet?: WalletInfo | null;
   onTaskAction?: (action: string, taskId: string) => void;
+  onTaskCountChange?: (count: number) => void;
 }
 
 export default function TaskMarketplace({
   wallet,
   onTaskAction,
+  onTaskCountChange,
 }: TaskMarketplaceProps) {
   const [tasks, setTasks] = useState<AgencTask[]>([]);
   const [selectedTask, setSelectedTask] = useState<AgencTask | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [filter, setFilter] = useState<TaskStatus | 'all'>('open');
+  const [filter, setFilter] = useState<TaskStatus | 'all' | 'mine'>('open');
   const [error, setError] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const prevTaskIdsRef = useRef<Set<string>>(new Set());
+  const addToast = useNotificationStore((s) => s.addToast);
 
   // Fetch tasks
   const fetchTasks = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const result = await TetsuoAPI.task.listTasks(filter === 'all' ? undefined : filter);
+      // "mine" filter fetches all then filters client-side
+      const apiFilter = (filter === 'all' || filter === 'mine') ? undefined : filter;
+      let result = await TetsuoAPI.task.listTasks(apiFilter);
+
+      if (filter === 'mine' && wallet?.address) {
+        result = result.filter(
+          (t) => t.creator === wallet.address || t.claimer === wallet.address
+        );
+      }
+
+      // Detect new tasks for notification
+      const newIds = new Set(result.map((t) => t.id));
+      if (prevTaskIdsRef.current.size > 0) {
+        const added = result.filter((t) => !prevTaskIdsRef.current.has(t.id));
+        if (added.length > 0) {
+          addToast({
+            type: 'info',
+            title: `${added.length} new task${added.length > 1 ? 's' : ''}`,
+            message: added[0]?.description.slice(0, 60),
+          });
+        }
+      }
+      prevTaskIdsRef.current = newIds;
+
       setTasks(result);
+      onTaskCountChange?.(result.length);
     } catch (err) {
       setError(`Failed to load tasks: ${err}`);
       console.error('[TaskMarketplace] Error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [filter]);
+  }, [filter, wallet?.address, addToast, onTaskCountChange]);
 
   useEffect(() => {
     fetchTasks();
@@ -59,10 +89,11 @@ export default function TaskMarketplace({
     setActionLoading(taskId);
     try {
       await TetsuoAPI.task.claimTask(taskId);
+      addToast({ type: 'success', title: 'Task Claimed', message: `#${taskId.slice(0, 8)}...` });
       onTaskAction?.('claim', taskId);
       await fetchTasks();
     } catch (err) {
-      setError(`Failed to claim task: ${err}`);
+      addToast({ type: 'error', title: 'Claim Failed', message: `${err}` });
     } finally {
       setActionLoading(null);
     }
@@ -72,10 +103,11 @@ export default function TaskMarketplace({
     setActionLoading(taskId);
     try {
       await TetsuoAPI.task.completeTask(taskId);
+      addToast({ type: 'success', title: 'Task Completed', message: 'Reward incoming!' });
       onTaskAction?.('complete', taskId);
       await fetchTasks();
     } catch (err) {
-      setError(`Failed to complete task: ${err}`);
+      addToast({ type: 'error', title: 'Complete Failed', message: `${err}` });
     } finally {
       setActionLoading(null);
     }
@@ -85,10 +117,25 @@ export default function TaskMarketplace({
     setActionLoading(taskId);
     try {
       await TetsuoAPI.task.cancelTask(taskId);
+      addToast({ type: 'success', title: 'Task Cancelled', message: 'Reward returned.' });
       onTaskAction?.('cancel', taskId);
       await fetchTasks();
     } catch (err) {
-      setError(`Failed to cancel task: ${err}`);
+      addToast({ type: 'error', title: 'Cancel Failed', message: `${err}` });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCreateTask = async (desc: string, solReward: number, skrReward: number, deadlineHrs: number) => {
+    setActionLoading('create');
+    try {
+      await TetsuoAPI.task.createTask(desc, solReward, skrReward || undefined, deadlineHrs || undefined);
+      addToast({ type: 'success', title: 'Task Created', message: `${solReward} SOL reward` });
+      setShowCreateForm(false);
+      await fetchTasks();
+    } catch (err) {
+      addToast({ type: 'error', title: 'Create Failed', message: `${err}` });
     } finally {
       setActionLoading(null);
     }
@@ -151,9 +198,9 @@ export default function TaskMarketplace({
             </h2>
           </div>
 
-          {/* Filter */}
-          <div className="flex gap-1">
-            {(['all', 'open', 'claimed', 'completed'] as const).map((f) => (
+          {/* Filter + Create */}
+          <div className="flex gap-1 items-center">
+            {(['all', 'open', 'claimed', 'mine'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -166,6 +213,18 @@ export default function TaskMarketplace({
                 {f}
               </button>
             ))}
+            {wallet?.is_connected && (
+              <button
+                onClick={() => setShowCreateForm(!showCreateForm)}
+                className={`ml-1 px-2 py-1 text-[10px] uppercase tracking-wider rounded border transition-colors
+                  ${showCreateForm
+                    ? 'bg-neon-green/20 border-neon-green/50 text-neon-green'
+                    : 'bg-transparent border-neon-green/30 text-neon-green/70 hover:border-neon-green/50'
+                  }`}
+              >
+                + new
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -186,6 +245,24 @@ export default function TaskMarketplace({
             >
               [dismiss]
             </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Create Task Form */}
+      <AnimatePresence>
+        {showCreateForm && (
+          <motion.div
+            className="px-4 py-3 border-b border-neon-green/20 bg-neon-green/5"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <CreateTaskForm
+              loading={actionLoading === 'create'}
+              onSubmit={handleCreateTask}
+              onCancel={() => setShowCreateForm(false)}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -412,5 +489,103 @@ function ActionButton({ label, color, loading, disabled, onClick }: ActionButton
         label
       )}
     </button>
+  );
+}
+
+// ============================================================================
+// Create Task Form Component
+// ============================================================================
+
+interface CreateTaskFormProps {
+  loading: boolean;
+  onSubmit: (description: string, solReward: number, skrReward: number, deadlineHrs: number) => void;
+  onCancel: () => void;
+}
+
+function CreateTaskForm({ loading, onSubmit, onCancel }: CreateTaskFormProps) {
+  const [desc, setDesc] = useState('');
+  const [solReward, setSolReward] = useState('0.1');
+  const [skrReward, setSkrReward] = useState('');
+  const [deadline, setDeadline] = useState('');
+
+  const canSubmit = desc.trim().length > 0 && parseFloat(solReward) > 0 && !loading;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] uppercase tracking-widest text-neon-green/70 mb-1">
+        Create New Task
+      </div>
+
+      {/* Description */}
+      <textarea
+        value={desc}
+        onChange={(e) => setDesc(e.target.value)}
+        placeholder="Task description..."
+        rows={2}
+        className="w-full bg-black/30 border border-white/10 rounded px-2 py-1.5 text-xs text-white/80
+          placeholder:text-white/30 focus:outline-none focus:border-neon-green/40 resize-none"
+      />
+
+      {/* Rewards row */}
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-[9px] text-holo-silver/50 uppercase">SOL Reward</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={solReward}
+            onChange={(e) => setSolReward(e.target.value)}
+            className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-neon-green
+              font-mono focus:outline-none focus:border-neon-green/40"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-[9px] text-holo-silver/50 uppercase">SKR Reward</label>
+          <input
+            type="number"
+            step="1"
+            min="0"
+            value={skrReward}
+            onChange={(e) => setSkrReward(e.target.value)}
+            placeholder="0"
+            className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-neon-purple
+              font-mono placeholder:text-white/20 focus:outline-none focus:border-neon-purple/40"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-[9px] text-holo-silver/50 uppercase">Deadline (hrs)</label>
+          <input
+            type="number"
+            step="1"
+            min="0"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            placeholder="--"
+            className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-white/70
+              font-mono placeholder:text-white/20 focus:outline-none focus:border-white/30"
+          />
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-2 justify-end pt-1">
+        <button
+          onClick={onCancel}
+          className="px-3 py-1 text-[10px] uppercase tracking-wider text-white/50 hover:text-white/80"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onSubmit(desc.trim(), parseFloat(solReward) || 0, parseFloat(skrReward) || 0, parseInt(deadline) || 0)}
+          disabled={!canSubmit}
+          className={`px-3 py-1.5 text-[10px] uppercase tracking-wider rounded border transition-colors
+            border-neon-green/50 text-neon-green hover:bg-neon-green/10
+            ${!canSubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          {loading ? 'Creating...' : 'Create Task'}
+        </button>
+      </div>
+    </div>
   );
 }

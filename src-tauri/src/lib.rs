@@ -1589,6 +1589,165 @@ async fn list_tasks(state: State<'_, AppState>) -> Result<AsyncResult<Vec<AgencT
     }
 }
 
+/// Create a new task on-chain
+#[tauri::command]
+async fn create_task(
+    description: String,
+    reward_sol: f64,
+    reward_skr: Option<f64>,
+    deadline: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<ExecutionResult>, String> {
+    debug!("[IPC] create_task: {} ({} SOL)", description, reward_sol);
+
+    let executor = Arc::clone(&state.executor);
+    let db = Arc::clone(&state.db);
+
+    let handle = tokio::spawn(async move {
+        let exec = executor.read().await;
+        let mut params = serde_json::json!({
+            "description": description,
+            "reward_sol": reward_sol,
+        });
+        if let Some(skr) = reward_skr {
+            params["reward_skr"] = serde_json::json!(skr);
+        }
+        if let Some(dl) = deadline {
+            params["deadline_hours"] = serde_json::json!(dl);
+        }
+        let result = exec.execute_intent(&VoiceIntent {
+            action: operator_core::IntentAction::CreateTask,
+            params,
+            raw_transcript: None,
+        }).await?;
+
+        // Persist to local DB
+        if result.success {
+            if let Some(ref data) = result.data {
+                if let Ok(task) = serde_json::from_value::<AgencTask>(data.clone()) {
+                    let guard = db.read().await;
+                    if let Some(ref db) = *guard {
+                        let record = agenc_task_to_record(&task);
+                        let _ = db.upsert_task(&record);
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    });
+
+    match handle.await {
+        Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
+        Ok(Err(e)) => Ok(AsyncResult::err(e.to_string())),
+        Err(e) => Ok(AsyncResult::err(format!("Task failed: {}", e))),
+    }
+}
+
+/// Claim a task on-chain
+#[tauri::command]
+async fn claim_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<ExecutionResult>, String> {
+    debug!("[IPC] claim_task: {}", task_id);
+
+    let executor = Arc::clone(&state.executor);
+
+    let handle = tokio::spawn(async move {
+        let exec = executor.read().await;
+        exec.execute_intent(&VoiceIntent {
+            action: operator_core::IntentAction::ClaimTask,
+            params: serde_json::json!({ "task_id": task_id }),
+            raw_transcript: None,
+        }).await
+    });
+
+    match handle.await {
+        Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
+        Ok(Err(e)) => Ok(AsyncResult::err(e.to_string())),
+        Err(e) => Ok(AsyncResult::err(format!("Task failed: {}", e))),
+    }
+}
+
+/// Complete a task on-chain
+#[tauri::command]
+async fn complete_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<ExecutionResult>, String> {
+    debug!("[IPC] complete_task: {}", task_id);
+
+    let executor = Arc::clone(&state.executor);
+
+    let handle = tokio::spawn(async move {
+        let exec = executor.read().await;
+        exec.execute_intent(&VoiceIntent {
+            action: operator_core::IntentAction::CompleteTask,
+            params: serde_json::json!({ "task_id": task_id }),
+            raw_transcript: None,
+        }).await
+    });
+
+    match handle.await {
+        Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
+        Ok(Err(e)) => Ok(AsyncResult::err(e.to_string())),
+        Err(e) => Ok(AsyncResult::err(format!("Task failed: {}", e))),
+    }
+}
+
+/// Cancel a task on-chain (creator only)
+#[tauri::command]
+async fn cancel_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<ExecutionResult>, String> {
+    debug!("[IPC] cancel_task: {}", task_id);
+
+    let executor = Arc::clone(&state.executor);
+
+    let handle = tokio::spawn(async move {
+        let exec = executor.read().await;
+        exec.execute_intent(&VoiceIntent {
+            action: operator_core::IntentAction::CancelTask,
+            params: serde_json::json!({ "task_id": task_id }),
+            raw_transcript: None,
+        }).await
+    });
+
+    match handle.await {
+        Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
+        Ok(Err(e)) => Ok(AsyncResult::err(e.to_string())),
+        Err(e) => Ok(AsyncResult::err(format!("Task failed: {}", e))),
+    }
+}
+
+/// Get status of a specific task
+#[tauri::command]
+async fn get_task_status(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<ExecutionResult>, String> {
+    debug!("[IPC] get_task_status: {}", task_id);
+
+    let executor = Arc::clone(&state.executor);
+
+    let handle = tokio::spawn(async move {
+        let exec = executor.read().await;
+        exec.execute_intent(&VoiceIntent {
+            action: operator_core::IntentAction::GetTaskStatus,
+            params: serde_json::json!({ "task_id": task_id }),
+            raw_transcript: None,
+        }).await
+    });
+
+    match handle.await {
+        Ok(Ok(result)) => Ok(AsyncResult::ok(result)),
+        Ok(Err(e)) => Ok(AsyncResult::err(e.to_string())),
+        Err(e) => Ok(AsyncResult::err(format!("Task failed: {}", e))),
+    }
+}
+
 // ============================================================================
 // Tauri Commands - Policy (Fast, In-Memory)
 // ============================================================================
@@ -3256,6 +3415,12 @@ pub fn run() {
             get_protocol_state,
             list_tasks,
             refresh_state_background,
+            // Task CRUD (async spawned)
+            create_task,
+            claim_task,
+            complete_task,
+            cancel_task,
+            get_task_status,
             // Policy (fast in-memory)
             check_policy,
             get_session_spending,

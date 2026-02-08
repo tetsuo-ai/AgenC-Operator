@@ -21,6 +21,7 @@ import StatusBar from './components/StatusBar';
 import WalletDropdown from './components/WalletDropdown';
 import HudPanel from './components/HudPanel';
 import TaskMarketplace from './components/TaskMarketplace';
+import ToastContainer from './components/ToastContainer';
 import BottomNav from './components/BottomNav';
 import type { Tab } from './components/BottomNav';
 
@@ -80,6 +81,7 @@ function App() {
 
   // Mobile navigation state
   const [mobileTab, setMobileTab] = useState<Tab>('chat');
+  const [taskCount, setTaskCount] = useState(0);
   const mobile = isMobile();
 
   // Mobile Wallet Adapter (MWA) — only active on Android
@@ -401,6 +403,9 @@ function App() {
     <div className="w-full h-full bg-transparent flex flex-col overflow-hidden">
       {/* Glitch Overlay - Disabled for clean rendering */}
 
+      {/* Toast Notifications */}
+      <ToastContainer />
+
       {/* Custom Title Bar */}
       <TitleBar />
 
@@ -455,6 +460,7 @@ function App() {
         }`}>
           <TaskMarketplace
             wallet={wallet}
+            onTaskCountChange={setTaskCount}
             onTaskAction={(action, taskId) => {
               addMessage({
                 id: `task-${Date.now()}`,
@@ -514,7 +520,7 @@ function App() {
       )}
 
       {/* Mobile Bottom Navigation */}
-      <BottomNav activeTab={mobileTab} onTabChange={handleMobileTabChange} />
+      <BottomNav activeTab={mobileTab} onTabChange={handleMobileTabChange} taskCount={taskCount} />
     </div>
   );
 }

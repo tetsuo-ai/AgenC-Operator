@@ -16,6 +16,7 @@ type Tab = 'chat' | 'tasks' | 'settings';
 interface BottomNavProps {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
+  taskCount?: number;
 }
 
 const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
@@ -49,7 +50,7 @@ const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
   },
 ];
 
-export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
+export default function BottomNav({ activeTab, onTabChange, taskCount }: BottomNavProps) {
   if (!isMobile()) return null;
 
   return (
@@ -79,8 +80,14 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
                   transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                 />
               )}
-              <span className={isActive ? 'text-white' : 'text-white/40'}>
+              <span className={`relative ${isActive ? 'text-white' : 'text-white/40'}`}>
                 {tab.icon}
+                {tab.id === 'tasks' && (taskCount ?? 0) > 0 && !isActive && (
+                  <span className="absolute -top-1 -right-2 min-w-[14px] h-[14px] flex items-center justify-center
+                    rounded-full bg-neon-cyan text-black text-[8px] font-bold px-0.5">
+                    {taskCount! > 99 ? '99+' : taskCount}
+                  </span>
+                )}
               </span>
               <span
                 className={`text-[9px] mt-0.5 font-display tracking-widest ${
