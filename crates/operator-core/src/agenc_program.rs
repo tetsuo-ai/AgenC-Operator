@@ -17,9 +17,12 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
 };
+use spl_associated_token_account::get_associated_token_address;
 
-// System program ID — avoid deprecated solana_sdk::system_program
+// Well-known program IDs — avoid deprecated solana_sdk helpers
 const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
+const TOKEN_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ATA_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 use std::str::FromStr;
 
 // ============================================================================
@@ -31,6 +34,9 @@ pub const PROGRAM_ID: &str = "EopUaCV2svxj9j4hd7KjbrWfdjkspmm2BCBe7jGpKzKZ";
 
 /// SKR privacy cash token mint
 pub const SKR_MINT: &str = "9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD";
+
+/// SKR token decimals (standard SPL token)
+pub const SKR_DECIMALS: u8 = 9;
 
 /// Task account discriminator — first 8 bytes of SHA256("global:Task")
 pub const TASK_DISCRIMINATOR: [u8; 8] = [0x4f, 0x22, 0xe5, 0x37, 0x58, 0x5a, 0x37, 0x54];
@@ -50,6 +56,27 @@ pub fn program_id() -> Pubkey {
 
 pub fn skr_mint() -> Pubkey {
     Pubkey::from_str(SKR_MINT).expect("Invalid SKR mint")
+}
+
+/// Get the Associated Token Account (ATA) for a wallet's SKR holdings.
+pub fn get_skr_ata(wallet: &Pubkey) -> Pubkey {
+    get_associated_token_address(wallet, &skr_mint())
+}
+
+/// Get the SKR escrow ATA — an ATA owned by the escrow PDA for holding SKR tokens.
+pub fn get_skr_escrow_ata(task_pda: &Pubkey) -> Pubkey {
+    let (escrow_pda, _) = derive_escrow_pda(task_pda);
+    get_associated_token_address(&escrow_pda, &skr_mint())
+}
+
+/// Convert SKR token amount (raw) to display units.
+pub fn skr_tokens_to_display(tokens: u64) -> f64 {
+    tokens as f64 / 10u64.pow(SKR_DECIMALS as u32) as f64
+}
+
+/// Convert display units to raw SKR token amount.
+pub fn display_to_skr_tokens(display: f64) -> u64 {
+    (display * 10u64.pow(SKR_DECIMALS as u32) as f64) as u64
 }
 
 // ============================================================================
@@ -124,6 +151,8 @@ pub struct OnChainTask {
     pub constraint_hash: [u8; 32],
     pub state: OnChainTaskState,
     pub reward_lamports: u64,
+    /// SKR token reward (raw token amount, 0 if no SKR reward)
+    pub reward_skr_tokens: u64,
     pub deadline: i64,
     pub claimed_by: Option<String>,
 }
@@ -181,6 +210,13 @@ impl OnChainTask {
             None
         };
 
+        // SKR reward: u64 LE at offset 204..212 (optional — 0 if account is shorter)
+        let reward_skr_tokens = if data.len() >= 212 {
+            u64::from_le_bytes(data[204..212].try_into().unwrap_or([0; 8]))
+        } else {
+            0
+        };
+
         Ok(Self {
             task_id,
             pda: pda.to_string(),
@@ -191,6 +227,7 @@ impl OnChainTask {
             constraint_hash,
             state,
             reward_lamports,
+            reward_skr_tokens,
             deadline,
             claimed_by,
         })
@@ -258,6 +295,139 @@ pub fn instruction_discriminator(name: &str) -> [u8; 8] {
 // Instruction Builders
 // ============================================================================
 
+/// Build a `create_task` instruction.
+///
+/// Accounts:
+///   0. [writable] Task PDA
+///   1. [writable] Escrow PDA (native SOL escrow)
+///   2. [signer]   Creator (wallet)
+///   3. []         Protocol config PDA
+///   4. []         System program
+///
+/// Data: discriminator (8) + description_hash (32) + reward_lamports (8)
+///       + deadline (8) + required_capabilities (8) = 64 bytes
+pub fn build_create_task_ix(
+    task_id: u64,
+    creator: &Pubkey,
+    description_hash: [u8; 32],
+    reward_lamports: u64,
+    deadline: i64,
+    required_capabilities: u64,
+) -> Instruction {
+    let (task_pda, _) = derive_task_pda(task_id);
+    let (escrow_pda, _) = derive_escrow_pda(&task_pda);
+    let (protocol_pda, _) = derive_protocol_pda();
+
+    let disc = instruction_discriminator("create_task");
+
+    let mut data = Vec::with_capacity(72);
+    data.extend_from_slice(&disc);
+    data.extend_from_slice(&description_hash);
+    data.extend_from_slice(&reward_lamports.to_le_bytes());
+    data.extend_from_slice(&deadline.to_le_bytes());
+    data.extend_from_slice(&required_capabilities.to_le_bytes());
+
+    Instruction {
+        program_id: program_id(),
+        accounts: vec![
+            AccountMeta::new(task_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(*creator, true), // signer + funds source
+            AccountMeta::new_readonly(protocol_pda, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ],
+        data,
+    }
+}
+
+/// Build an SPL token transfer instruction to move SKR tokens into escrow.
+///
+/// This should be included in the same transaction as `create_task` when
+/// the task includes an SKR reward.
+pub fn build_skr_escrow_deposit_ix(
+    creator: &Pubkey,
+    task_pda: &Pubkey,
+    skr_amount: u64,
+) -> Vec<Instruction> {
+    let creator_skr_ata = get_skr_ata(creator);
+    let escrow_skr_ata = get_skr_escrow_ata(task_pda);
+    let (escrow_pda, _) = derive_escrow_pda(task_pda);
+    let mint = skr_mint();
+
+    let mut ixs = Vec::with_capacity(2);
+
+    // 1. Create the escrow's ATA if it doesn't exist (idempotent)
+    ixs.push(
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            creator,       // payer
+            &escrow_pda,   // wallet (owner of the ATA)
+            &mint,         // token mint
+            &TOKEN_PROGRAM_ID,
+        ),
+    );
+
+    // 2. Transfer SKR from creator to escrow ATA
+    ixs.push(
+        spl_token::instruction::transfer(
+            &TOKEN_PROGRAM_ID,
+            &creator_skr_ata,    // source
+            &escrow_skr_ata,     // destination
+            creator,             // authority (signer)
+            &[],                 // no multisig
+            skr_amount,
+        )
+        .expect("Failed to build SPL transfer instruction"),
+    );
+
+    ixs
+}
+
+/// Build instructions to release SKR tokens from escrow to the worker on task completion.
+///
+/// Requires the escrow PDA to sign via CPI in the on-chain program.
+/// If the program handles this internally, only include the accounts —
+/// otherwise append these instructions to the complete_task transaction.
+pub fn build_skr_escrow_release_ix(
+    task_pda: &Pubkey,
+    worker: &Pubkey,
+    skr_amount: u64,
+) -> Vec<Instruction> {
+    let escrow_skr_ata = get_skr_escrow_ata(task_pda);
+    let worker_skr_ata = get_skr_ata(worker);
+    let (escrow_pda, _) = derive_escrow_pda(task_pda);
+    let mint = skr_mint();
+
+    let mut ixs = Vec::with_capacity(2);
+
+    // 1. Create the worker's SKR ATA if needed
+    ixs.push(
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            worker,        // payer
+            worker,        // wallet (owner of the ATA)
+            &mint,
+            &TOKEN_PROGRAM_ID,
+        ),
+    );
+
+    // 2. Transfer from escrow to worker
+    // NOTE: In practice the on-chain program handles this via CPI with PDA signing.
+    // This instruction is provided for client-side building when the program
+    // delegates token transfers to the caller's transaction.
+    ixs.push(
+        spl_token::instruction::transfer(
+            &TOKEN_PROGRAM_ID,
+            &escrow_skr_ata,
+            &worker_skr_ata,
+            &escrow_pda,     // authority (escrow PDA — must be signed via CPI)
+            &[],
+            skr_amount,
+        )
+        .expect("Failed to build SPL transfer instruction"),
+    );
+
+    ixs
+}
+
 /// Build a `claim_task` instruction.
 ///
 /// Accounts:
@@ -296,7 +466,7 @@ pub fn build_claim_task_ix(
 
 /// Build a `complete_task` instruction.
 ///
-/// Accounts:
+/// Accounts (base — SOL only):
 ///   0. [writable] Task PDA
 ///   1. [writable] Claim PDA
 ///   2. [writable] Escrow PDA
@@ -304,11 +474,19 @@ pub fn build_claim_task_ix(
 ///   4. []         Protocol config PDA
 ///   5. [writable] Treasury
 ///   6. []         System program
+///
+/// Additional accounts when `include_skr` is true:
+///   7. [writable] Escrow SKR ATA
+///   8. [writable] Worker SKR ATA
+///   9. []         SKR mint
+///  10. []         Token program
+///  11. []         ATA program
 pub fn build_complete_task_ix(
     task_pda: &Pubkey,
     agent_pubkey: &Pubkey,
     proof_hash: [u8; 32],
     result_data: Option<[u8; 64]>,
+    include_skr: bool,
 ) -> Instruction {
     let (claim_pda, _) = derive_claim_pda(task_pda, agent_pubkey);
     let (escrow_pda, _) = derive_escrow_pda(task_pda);
@@ -326,17 +504,30 @@ pub fn build_complete_task_ix(
     // For now use the protocol PDA as a placeholder.
     let treasury = protocol_pda;
 
+    let mut accounts = vec![
+        AccountMeta::new(*task_pda, false),
+        AccountMeta::new(claim_pda, false),
+        AccountMeta::new(escrow_pda, false),
+        AccountMeta::new(*agent_pubkey, true), // signer + reward recipient
+        AccountMeta::new_readonly(protocol_pda, false),
+        AccountMeta::new(treasury, false),
+        AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+    ];
+
+    // Append SKR token accounts if the task has an SKR reward
+    if include_skr {
+        let escrow_skr_ata = get_skr_escrow_ata(task_pda);
+        let worker_skr_ata = get_skr_ata(agent_pubkey);
+        accounts.push(AccountMeta::new(escrow_skr_ata, false));
+        accounts.push(AccountMeta::new(worker_skr_ata, false));
+        accounts.push(AccountMeta::new_readonly(skr_mint(), false));
+        accounts.push(AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false));
+        accounts.push(AccountMeta::new_readonly(ATA_PROGRAM_ID, false));
+    }
+
     Instruction {
         program_id: program_id(),
-        accounts: vec![
-            AccountMeta::new(*task_pda, false),
-            AccountMeta::new(claim_pda, false),
-            AccountMeta::new(escrow_pda, false),
-            AccountMeta::new(*agent_pubkey, true), // signer + reward recipient
-            AccountMeta::new_readonly(protocol_pda, false),
-            AccountMeta::new(treasury, false),
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-        ],
+        accounts,
         data,
     }
 }
@@ -410,6 +601,19 @@ pub async fn fetch_task_by_id(rpc: &RpcClient, task_id: u64) -> Result<Option<On
     }
 }
 
+/// Fetch the SKR token balance for a wallet.
+/// Returns 0 if the ATA doesn't exist.
+pub async fn fetch_skr_balance(rpc: &RpcClient, wallet: &Pubkey) -> Result<u64> {
+    let ata = get_skr_ata(wallet);
+    match rpc.get_token_account_balance(&ata).await {
+        Ok(balance) => {
+            let amount = balance.amount.parse::<u64>().unwrap_or(0);
+            Ok(amount)
+        }
+        Err(_) => Ok(0), // ATA doesn't exist — zero balance
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -449,5 +653,36 @@ mod tests {
             assert_eq!(state as u8, state_byte);
         }
         assert!(OnChainTaskState::from_byte(6).is_err());
+    }
+
+    #[test]
+    fn test_skr_mint_parses() {
+        let mint = skr_mint();
+        assert_eq!(mint.to_string(), SKR_MINT);
+    }
+
+    #[test]
+    fn test_skr_ata_derivation() {
+        // Derive a deterministic ATA for a known wallet
+        let wallet = Pubkey::from_str("11111111111111111111111111111112").unwrap();
+        let ata = get_skr_ata(&wallet);
+        // ATA should be a valid, non-default pubkey
+        assert_ne!(ata, Pubkey::default());
+    }
+
+    #[test]
+    fn test_skr_token_conversion() {
+        assert_eq!(display_to_skr_tokens(1.0), 1_000_000_000);
+        assert_eq!(display_to_skr_tokens(0.5), 500_000_000);
+        assert!((skr_tokens_to_display(1_000_000_000) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_create_task_ix_builds() {
+        let creator = Pubkey::new_unique();
+        let desc_hash = [0xAA; 32];
+        let ix = build_create_task_ix(1, &creator, desc_hash, 1_000_000, 0, 0);
+        assert_eq!(ix.program_id, program_id());
+        assert_eq!(ix.accounts.len(), 5);
     }
 }

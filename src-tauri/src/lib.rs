@@ -165,6 +165,7 @@ fn agenc_task_to_record(task: &AgencTask) -> TaskRecord {
         on_chain_signature: None,
         description: Some(task.description.clone()),
         reward_lamports: Some(task.reward_lamports),
+        reward_skr_tokens: if task.reward_skr_tokens > 0 { Some(task.reward_skr_tokens) } else { None },
         creator: Some(task.creator.clone()),
     }
 }

@@ -1068,12 +1068,14 @@ export const TaskAPI = {
    * Create a new task
    * @param description - Task description
    * @param rewardSol - Reward amount in SOL
+   * @param rewardSkr - Optional SKR token reward amount (display units)
    * @param deadline - Optional deadline timestamp
    */
-  createTask(description: string, rewardSol: number, deadline?: number): Promise<ExecutionResult> {
+  createTask(description: string, rewardSol: number, rewardSkr?: number, deadline?: number): Promise<ExecutionResult> {
     return invoke<AsyncResult<ExecutionResult>>('create_task', {
       description,
       rewardSol,
+      rewardSkr,
       deadline,
     })
       .then(unwrapResult)

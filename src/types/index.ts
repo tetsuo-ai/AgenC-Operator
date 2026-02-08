@@ -62,6 +62,8 @@ export interface AgencTask {
   creator: string;
   description: string;
   reward_lamports: number;
+  /** SKR token reward in raw token units (0 if none) */
+  reward_skr_tokens?: number;
   status: TaskStatus;
   claimer?: string;
   created_at: number;
@@ -71,6 +73,11 @@ export interface AgencTask {
 // Helper to convert lamports to SOL
 export const lamportsToSol = (lamports: number): number => lamports / 1_000_000_000;
 export const solToLamports = (sol: number): number => sol * 1_000_000_000;
+
+// SKR token helpers
+export const SKR_DECIMALS = 9;
+export const skrTokensToDisplay = (tokens: number): number => tokens / 10 ** SKR_DECIMALS;
+export const displayToSkrTokens = (display: number): number => display * 10 ** SKR_DECIMALS;
 
 // ============================================================================
 // Protocol State
@@ -537,6 +544,7 @@ export interface TaskRecord {
   on_chain_signature: string | null;
   description: string | null;
   reward_lamports: number | null;
+  reward_skr_tokens?: number | null;
   creator: string | null;
 }
 

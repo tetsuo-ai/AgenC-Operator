@@ -73,8 +73,9 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
 
-# SPL token for token gating
+# SPL token for token gating and SKR escrows
 spl-associated-token-account = "4.0"
+spl-token = "6.0"
 
 # CLI parsing
 clap = { version = "4.4", features = ["derive"] }

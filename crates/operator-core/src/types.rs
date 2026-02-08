@@ -118,6 +118,9 @@ impl IntentAction {
 pub struct CreateTaskParams {
     pub description: String,
     pub reward_sol: f64,
+    /// Optional SKR token reward (in display units, e.g. 100.0 = 100 SKR)
+    #[serde(default)]
+    pub reward_skr: Option<f64>,
     #[serde(default)]
     pub deadline_hours: Option<u64>,
     #[serde(default)]
@@ -145,6 +148,9 @@ pub struct AgencTask {
     pub creator: String,
     pub description: String,
     pub reward_lamports: u64,
+    /// SKR token reward (raw token amount, 0 if none)
+    #[serde(default)]
+    pub reward_skr_tokens: u64,
     pub status: TaskStatus,
     pub claimer: Option<String>,
     pub created_at: i64,
@@ -155,6 +161,11 @@ impl AgencTask {
     /// Convert lamports to SOL for display
     pub fn reward_sol(&self) -> f64 {
         self.reward_lamports as f64 / 1_000_000_000.0
+    }
+
+    /// Convert raw SKR tokens to display units
+    pub fn reward_skr_display(&self) -> f64 {
+        self.reward_skr_tokens as f64 / 1_000_000_000.0
     }
 }
 

@@ -15,8 +15,9 @@ qdrant-client = { workspace = true }
 # UUID generation
 uuid = { workspace = true }
 
-# SPL token for token gating
+# SPL token for token gating and SKR escrows
 spl-associated-token-account = { workspace = true }
+spl-token = { workspace = true }
 
 # HTTP client for embeddings API
 reqwest = { workspace = true }

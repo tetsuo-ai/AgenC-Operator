@@ -25,8 +25,9 @@ use tracing::info;
 
 use crate::agenc_program::{
     self, OnChainTaskState,
-    derive_task_pda, build_claim_task_ix, build_complete_task_ix,
-    fetch_tasks_by_state, fetch_task_by_id,
+    derive_task_pda, build_create_task_ix, build_claim_task_ix, build_complete_task_ix,
+    build_skr_escrow_deposit_ix, fetch_tasks_by_state, fetch_task_by_id,
+    fetch_skr_balance, display_to_skr_tokens, skr_tokens_to_display,
 };
 use crate::types::*;
 
@@ -207,29 +208,32 @@ impl SolanaExecutor {
         }
     }
 
-    /// Create a new task on-chain
+    /// Create a new task on-chain with SOL reward and optional SKR token reward
     async fn create_task(&self, params: &serde_json::Value) -> Result<ExecutionResult> {
         let parsed: CreateTaskParams = serde_json::from_value(params.clone())
             .map_err(|e| anyhow!("Invalid create task params: {}", e))?;
 
-        info!("Creating task: {} with reward {} SOL",
-              parsed.description, parsed.reward_sol);
+        let skr_amount = parsed.reward_skr.unwrap_or(0.0);
+        info!("Creating task: {} with reward {} SOL + {} SKR",
+              parsed.description, parsed.reward_sol, skr_amount);
 
         // Verify wallet is loaded
         let keypair_guard = self.keypair.read().await;
         let keypair = keypair_guard.as_ref()
             .ok_or_else(|| anyhow!("Wallet not connected"))?;
 
-        // Check balance
+        // Check SOL balance
         let balance = self.rpc_client.get_balance(&keypair.pubkey()).await?;
         let reward_lamports = (parsed.reward_sol * 1_000_000_000.0) as u64;
+        // Account for tx fees + rent for new accounts
+        let sol_needed = reward_lamports + 50_000;
 
-        if balance < reward_lamports + 10_000 {
+        if balance < sol_needed {
             return Ok(ExecutionResult {
                 success: false,
                 message: format!(
-                    "Insufficient balance. Need {} SOL, have {} SOL",
-                    parsed.reward_sol + 0.00001,
+                    "Insufficient SOL balance. Need {:.4} SOL, have {:.4} SOL",
+                    sol_needed as f64 / 1_000_000_000.0,
                     balance as f64 / 1_000_000_000.0
                 ),
                 signature: None,
@@ -237,35 +241,97 @@ impl SolanaExecutor {
             });
         }
 
-        // TODO: Build actual AgenC program instruction
-        // For MVP, we'll simulate with a memo/transfer
-        // In production, replace with actual program CPI
+        // Check SKR balance if SKR reward is specified
+        let skr_tokens = if skr_amount > 0.0 {
+            let raw = display_to_skr_tokens(skr_amount);
+            let skr_balance = fetch_skr_balance(&self.rpc_client, &keypair.pubkey()).await
+                .unwrap_or(0);
+            if skr_balance < raw {
+                return Ok(ExecutionResult {
+                    success: false,
+                    message: format!(
+                        "Insufficient SKR balance. Need {} SKR, have {} SKR",
+                        skr_amount,
+                        skr_tokens_to_display(skr_balance)
+                    ),
+                    signature: None,
+                    data: None,
+                });
+            }
+            raw
+        } else {
+            0
+        };
 
-        // Simulate task creation (placeholder - integrate with actual AgenC program)
-        let task_id = format!("task_{}", chrono::Utc::now().timestamp_millis());
+        // Generate a task ID from timestamp (will be overwritten by on-chain program counter)
+        let task_id_num = chrono::Utc::now().timestamp_millis() as u64;
+
+        // Build description hash
+        use sha2::{Sha256, Digest};
+        let description_hash: [u8; 32] = Sha256::digest(parsed.description.as_bytes()).into();
+
+        let deadline = parsed.deadline_hours.map(|h|
+            chrono::Utc::now().timestamp() + (h as i64 * 3600)
+        ).unwrap_or(0);
+
+        // Build the create_task instruction
+        let create_ix = build_create_task_ix(
+            task_id_num,
+            &keypair.pubkey(),
+            description_hash,
+            reward_lamports,
+            deadline,
+            0, // no specific capabilities required
+        );
+
+        let mut instructions = vec![create_ix];
+
+        // If SKR reward, add escrow deposit instructions
+        if skr_tokens > 0 {
+            let (task_pda, _) = derive_task_pda(task_id_num);
+            let deposit_ixs = build_skr_escrow_deposit_ix(
+                &keypair.pubkey(),
+                &task_pda,
+                skr_tokens,
+            );
+            instructions.extend(deposit_ixs);
+        }
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash().await
+            .map_err(|e| anyhow!("Failed to get blockhash: {}", e))?;
+
+        let message = Message::new(&instructions, Some(&keypair.pubkey()));
+        let tx = Transaction::new(&[keypair], message, recent_blockhash);
+
+        let signature = self.rpc_client.send_and_confirm_transaction(&tx).await
+            .map_err(|e| anyhow!("Transaction failed: {}", e))?;
+
+        let (task_pda, _) = derive_task_pda(task_id_num);
 
         let task = AgencTask {
-            id: task_id.clone(),
+            id: task_pda.to_string(),
             creator: keypair.pubkey().to_string(),
             description: parsed.description.clone(),
             reward_lamports,
+            reward_skr_tokens: skr_tokens,
             status: TaskStatus::Open,
             claimer: None,
             created_at: chrono::Utc::now().timestamp(),
-            deadline: parsed.deadline_hours.map(|h|
-                chrono::Utc::now().timestamp() + (h as i64 * 3600)
-            ),
+            deadline: Some(deadline),
         };
 
-        info!("Task created (simulated): {}", task_id);
+        let mut msg = format!("Task created! Reward: {:.4} SOL", parsed.reward_sol);
+        if skr_amount > 0.0 {
+            msg.push_str(&format!(" + {} SKR", skr_amount));
+        }
+        msg.push_str(&format!(". TX: {}", signature));
+
+        info!("Task created on-chain! TX: {}", signature);
 
         Ok(ExecutionResult {
             success: true,
-            message: format!(
-                "Task created successfully! ID: {}. Reward: {} SOL",
-                task_id, parsed.reward_sol
-            ),
-            signature: Some(format!("sim_{}", task_id)), // Simulated signature
+            message: msg,
+            signature: Some(signature.to_string()),
             data: Some(serde_json::to_value(task)?),
         })
     }
@@ -324,11 +390,22 @@ impl SolanaExecutor {
         let keypair = keypair_guard.as_ref()
             .ok_or_else(|| anyhow!("Wallet not connected"))?;
 
-        let task_pda = if let Ok(id) = parsed.task_id.parse::<u64>() {
-            derive_task_pda(id).0
+        let (task_pda, task_id_num) = if let Ok(id) = parsed.task_id.parse::<u64>() {
+            (derive_task_pda(id).0, Some(id))
         } else {
-            Pubkey::from_str(&parsed.task_id)
-                .map_err(|_| anyhow!("Invalid task ID"))?
+            let pda = Pubkey::from_str(&parsed.task_id)
+                .map_err(|_| anyhow!("Invalid task ID"))?;
+            (pda, None)
+        };
+
+        // Check on-chain task to see if it has an SKR reward
+        let has_skr = if let Some(id) = task_id_num {
+            match fetch_task_by_id(&self.rpc_client, id).await? {
+                Some(task) => task.reward_skr_tokens > 0,
+                None => false,
+            }
+        } else {
+            false
         };
 
         // Generate proof hash: SHA256(task_pda || agent_pubkey || timestamp)
@@ -340,7 +417,7 @@ impl SolanaExecutor {
         hasher.update(&timestamp.to_le_bytes());
         let proof_hash: [u8; 32] = hasher.finalize().into();
 
-        let ix = build_complete_task_ix(&task_pda, &keypair.pubkey(), proof_hash, None);
+        let ix = build_complete_task_ix(&task_pda, &keypair.pubkey(), proof_hash, None, has_skr);
 
         let recent_blockhash = self.rpc_client.get_latest_blockhash().await
             .map_err(|e| anyhow!("Failed to get blockhash: {}", e))?;
@@ -392,6 +469,7 @@ impl SolanaExecutor {
                         t.task_id, t.description_hash[0], t.description_hash[1],
                         t.description_hash[2], t.description_hash[3]),
                     reward_lamports: t.reward_lamports,
+                    reward_skr_tokens: t.reward_skr_tokens,
                     status: match t.state {
                         OnChainTaskState::Open => TaskStatus::Open,
                         OnChainTaskState::InProgress => TaskStatus::Claimed,
@@ -433,19 +511,26 @@ impl SolanaExecutor {
 
         if let Ok(id) = task_id.parse::<u64>() {
             match fetch_task_by_id(&self.rpc_client, id).await? {
-                Some(task) => Ok(ExecutionResult {
-                    success: true,
-                    message: format!(
-                        "Task #{}: {} | Reward: {:.4} SOL | Creator: {}...{}",
-                        task.task_id,
-                        task.state.label(),
-                        task.reward_sol(),
-                        &task.creator[..4],
-                        &task.creator[task.creator.len()-4..],
-                    ),
-                    signature: None,
-                    data: Some(serde_json::to_value(&task)?),
-                }),
+                Some(task) => {
+                    let mut reward_str = format!("{:.4} SOL", task.reward_sol());
+                    if task.reward_skr_tokens > 0 {
+                        reward_str.push_str(&format!(" + {} SKR",
+                            skr_tokens_to_display(task.reward_skr_tokens)));
+                    }
+                    Ok(ExecutionResult {
+                        success: true,
+                        message: format!(
+                            "Task #{}: {} | Reward: {} | Creator: {}...{}",
+                            task.task_id,
+                            task.state.label(),
+                            reward_str,
+                            &task.creator[..4],
+                            &task.creator[task.creator.len()-4..],
+                        ),
+                        signature: None,
+                        data: Some(serde_json::to_value(&task)?),
+                    })
+                },
                 None => Ok(ExecutionResult {
                     success: false,
                     message: format!("Task {} not found on-chain.", task_id),

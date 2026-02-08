@@ -26,6 +26,9 @@ pub struct TaskRecord {
     pub on_chain_signature: Option<String>,
     pub description: Option<String>,
     pub reward_lamports: Option<u64>,
+    /// SKR token reward (raw token amount)
+    #[serde(default)]
+    pub reward_skr_tokens: Option<u64>,
     pub creator: Option<String>,
 }
 

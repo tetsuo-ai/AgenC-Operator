@@ -15,8 +15,9 @@ tauri-build = { workspace = true, features = [] }
 # Core operator logic
 operator-core = { path = "../crates/operator-core" }
 
-# Solana SDK (for Pubkey type in access control)
+# Solana SDK + RPC client (for Pubkey type and mobile balance queries)
 solana-sdk = { workspace = true }
+solana-client = { workspace = true }
 
 # Tauri v2
 tauri = { workspace = true, features = ["tray-icon"] }

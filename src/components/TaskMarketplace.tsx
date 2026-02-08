@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TetsuoAPI } from '../api';
 import type { AgencTask, TaskStatus, WalletInfo } from '../types';
-import { lamportsToSol } from '../types';
+import { lamportsToSol, skrTokensToDisplay } from '../types';
 
 interface TaskMarketplaceProps {
   wallet?: WalletInfo | null;
@@ -245,6 +245,14 @@ export default function TaskMarketplace({
                       {lamportsToSol(task.reward_lamports).toFixed(2)}
                     </div>
                     <div className="text-[10px] text-holo-silver/50">SOL</div>
+                    {(task.reward_skr_tokens ?? 0) > 0 && (
+                      <>
+                        <div className="font-mono text-sm text-neon-purple mt-0.5">
+                          +{skrTokensToDisplay(task.reward_skr_tokens!).toFixed(0)}
+                        </div>
+                        <div className="text-[10px] text-holo-silver/50">SKR</div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -347,7 +355,11 @@ export default function TaskMarketplace({
         <div className="flex justify-between text-[10px] text-holo-silver/50">
           <span>{tasks.length} tasks</span>
           <span>
-            Total: {tasks.reduce((acc, t) => acc + lamportsToSol(t.reward_lamports), 0).toFixed(2)} SOL
+            {tasks.reduce((acc, t) => acc + lamportsToSol(t.reward_lamports), 0).toFixed(2)} SOL
+            {(() => {
+              const totalSkr = tasks.reduce((acc, t) => acc + skrTokensToDisplay(t.reward_skr_tokens ?? 0), 0);
+              return totalSkr > 0 ? ` + ${totalSkr.toFixed(0)} SKR` : '';
+            })()}
           </span>
         </div>
       </div>
