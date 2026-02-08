@@ -55,7 +55,7 @@ export interface VoiceIntent {
 // Task Types
 // ============================================================================
 
-export type TaskStatus = 'open' | 'claimed' | 'completed' | 'cancelled' | 'disputed';
+export type TaskStatus = 'open' | 'claimed' | 'in_progress' | 'pending_validation' | 'completed' | 'cancelled' | 'disputed';
 
 export interface AgencTask {
   id: string;

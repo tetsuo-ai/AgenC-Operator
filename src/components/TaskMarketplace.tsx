@@ -94,10 +94,12 @@ export default function TaskMarketplace({
     }
   };
 
-  // Status colors
+  // Status colors — includes on-chain states
   const statusColors: Record<TaskStatus, string> = {
     open: 'text-neon-green',
     claimed: 'text-neon-cyan',
+    in_progress: 'text-neon-cyan',
+    pending_validation: 'text-yellow-400',
     completed: 'text-neon-purple',
     cancelled: 'text-holo-silver/50',
     disputed: 'text-neon-magenta',
@@ -106,6 +108,8 @@ export default function TaskMarketplace({
   const statusBgColors: Record<TaskStatus, string> = {
     open: 'bg-neon-green/10 border-neon-green/30',
     claimed: 'bg-neon-cyan/10 border-neon-cyan/30',
+    in_progress: 'bg-neon-cyan/10 border-neon-cyan/30',
+    pending_validation: 'bg-yellow-400/10 border-yellow-400/30',
     completed: 'bg-neon-purple/10 border-neon-purple/30',
     cancelled: 'bg-holo-silver/10 border-holo-silver/30',
     disputed: 'bg-neon-magenta/10 border-neon-magenta/30',
@@ -296,8 +300,8 @@ export default function TaskMarketplace({
                           />
                         )}
 
-                        {/* Complete - if claimed by current user */}
-                        {task.status === 'claimed' && isClaimer(task) && (
+                        {/* Complete - if claimed/in_progress by current user */}
+                        {(task.status === 'claimed' || task.status === 'in_progress') && isClaimer(task) && (
                           <ActionButton
                             label="Mark Complete"
                             color="green"

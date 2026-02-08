@@ -15,12 +15,19 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
+    transaction::Transaction,
+    message::Message,
 };
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
+use crate::agenc_program::{
+    self, OnChainTaskState,
+    derive_task_pda, build_claim_task_ix, build_complete_task_ix,
+    fetch_tasks_by_state, fetch_task_by_id,
+};
 use crate::types::*;
 
 /// Main Solana executor - handles all chain interactions
@@ -40,9 +47,7 @@ impl SolanaExecutor {
     pub fn new(rpc_url: &str, network: &str) -> Self {
         info!("Initializing SolanaExecutor for {}", network);
 
-        // Placeholder program ID - replace with actual AgenC program
-        let program_id = Pubkey::from_str("AgENC111111111111111111111111111111111111111")
-            .unwrap_or_default();
+        let program_id = agenc_program::program_id();
 
         Self {
             rpc_client: RpcClient::new_with_commitment(
@@ -265,46 +270,93 @@ impl SolanaExecutor {
         })
     }
 
-    /// Claim an open task
+    /// Claim an open task on-chain
     async fn claim_task(&self, params: &serde_json::Value) -> Result<ExecutionResult> {
         let parsed: ClaimTaskParams = serde_json::from_value(params.clone())
             .map_err(|e| anyhow!("Invalid claim task params: {}", e))?;
 
         info!("Claiming task: {}", parsed.task_id);
 
-        // Verify wallet
         let keypair_guard = self.keypair.read().await;
-        let _keypair = keypair_guard.as_ref()
+        let keypair = keypair_guard.as_ref()
             .ok_or_else(|| anyhow!("Wallet not connected"))?;
 
-        // TODO: Fetch task from chain and verify it's open
-        // TODO: Build claim instruction for AgenC program
+        // Parse task_id as u64 or treat as PDA address
+        let task_pda = if let Ok(id) = parsed.task_id.parse::<u64>() {
+            derive_task_pda(id).0
+        } else {
+            Pubkey::from_str(&parsed.task_id)
+                .map_err(|_| anyhow!("Invalid task ID — must be a number or PDA address"))?
+        };
+
+        // Use wallet pubkey as agent_id (first 32 bytes)
+        let agent_id: [u8; 32] = keypair.pubkey().to_bytes();
+
+        let ix = build_claim_task_ix(&task_pda, &keypair.pubkey(), agent_id);
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash().await
+            .map_err(|e| anyhow!("Failed to get blockhash: {}", e))?;
+
+        let message = Message::new(&[ix], Some(&keypair.pubkey()));
+        let tx = Transaction::new(&[keypair], message, recent_blockhash);
+
+        let signature = self.rpc_client.send_and_confirm_transaction(&tx).await
+            .map_err(|e| anyhow!("Transaction failed: {}", e))?;
+
+        info!("Task claimed! TX: {}", signature);
 
         Ok(ExecutionResult {
             success: true,
-            message: format!("Task {} claimed successfully. Good luck, operator!", parsed.task_id),
-            signature: Some(format!("sim_claim_{}", parsed.task_id)),
+            message: format!("Task {} claimed successfully! TX: {}", parsed.task_id, signature),
+            signature: Some(signature.to_string()),
             data: None,
         })
     }
 
-    /// Complete a claimed task
+    /// Complete a claimed task on-chain with proof
     async fn complete_task(&self, params: &serde_json::Value) -> Result<ExecutionResult> {
         let parsed: CompleteTaskParams = serde_json::from_value(params.clone())
             .map_err(|e| anyhow!("Invalid complete task params: {}", e))?;
 
         info!("Completing task: {}", parsed.task_id);
 
-        // TODO: Submit completion proof to AgenC program
-        // This triggers the reward claim flow
+        let keypair_guard = self.keypair.read().await;
+        let keypair = keypair_guard.as_ref()
+            .ok_or_else(|| anyhow!("Wallet not connected"))?;
+
+        let task_pda = if let Ok(id) = parsed.task_id.parse::<u64>() {
+            derive_task_pda(id).0
+        } else {
+            Pubkey::from_str(&parsed.task_id)
+                .map_err(|_| anyhow!("Invalid task ID"))?
+        };
+
+        // Generate proof hash: SHA256(task_pda || agent_pubkey || timestamp)
+        use sha2::{Sha256, Digest};
+        let timestamp = chrono::Utc::now().timestamp() as u64;
+        let mut hasher = Sha256::new();
+        hasher.update(task_pda.as_ref());
+        hasher.update(keypair.pubkey().as_ref());
+        hasher.update(&timestamp.to_le_bytes());
+        let proof_hash: [u8; 32] = hasher.finalize().into();
+
+        let ix = build_complete_task_ix(&task_pda, &keypair.pubkey(), proof_hash, None);
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash().await
+            .map_err(|e| anyhow!("Failed to get blockhash: {}", e))?;
+
+        let message = Message::new(&[ix], Some(&keypair.pubkey()));
+        let tx = Transaction::new(&[keypair], message, recent_blockhash);
+
+        let signature = self.rpc_client.send_and_confirm_transaction(&tx).await
+            .map_err(|e| anyhow!("Transaction failed: {}", e))?;
+
+        info!("Task completed! TX: {}", signature);
 
         Ok(ExecutionResult {
             success: true,
-            message: format!(
-                "Task {} submitted for completion. Awaiting creator verification.",
-                parsed.task_id
-            ),
-            signature: Some(format!("sim_complete_{}", parsed.task_id)),
+            message: format!("Task {} completed! Reward incoming. TX: {}", parsed.task_id, signature),
+            signature: Some(signature.to_string()),
             data: None,
         })
     }
@@ -325,47 +377,53 @@ impl SolanaExecutor {
         })
     }
 
-    /// List all open tasks from the protocol
+    /// List open tasks from the AgenC program on-chain
     async fn list_open_tasks(&self) -> Result<ExecutionResult> {
-        info!("Fetching open tasks...");
+        info!("Fetching open tasks from AgenC program...");
 
-        // TODO: Query AgenC program accounts for open tasks
-        // For MVP, return simulated data
+        match fetch_tasks_by_state(&self.rpc_client, OnChainTaskState::Open, 50).await {
+            Ok(tasks) => {
+                let count = tasks.len();
+                // Convert to the frontend AgencTask format
+                let frontend_tasks: Vec<AgencTask> = tasks.iter().map(|t| AgencTask {
+                    id: t.pda.clone(),
+                    creator: t.creator.clone(),
+                    description: format!("Task #{} (hash: {:02x}{:02x}{:02x}{:02x}...)",
+                        t.task_id, t.description_hash[0], t.description_hash[1],
+                        t.description_hash[2], t.description_hash[3]),
+                    reward_lamports: t.reward_lamports,
+                    status: match t.state {
+                        OnChainTaskState::Open => TaskStatus::Open,
+                        OnChainTaskState::InProgress => TaskStatus::Claimed,
+                        OnChainTaskState::Completed | OnChainTaskState::PendingValidation => TaskStatus::Completed,
+                        OnChainTaskState::Cancelled => TaskStatus::Cancelled,
+                        OnChainTaskState::Disputed => TaskStatus::Disputed,
+                    },
+                    claimer: t.claimed_by.clone(),
+                    created_at: 0, // Not stored in on-chain account
+                    deadline: Some(t.deadline),
+                }).collect();
 
-        let mock_tasks = vec![
-            AgencTask {
-                id: "task_001".into(),
-                creator: "7K8x...3Qr9".into(),
-                description: "Audit token swap program for overflow vulnerabilities".into(),
-                reward_lamports: 500_000_000,
-                status: TaskStatus::Open,
-                claimer: None,
-                created_at: chrono::Utc::now().timestamp() - 3600,
-                deadline: Some(chrono::Utc::now().timestamp() + 86400),
-            },
-            AgencTask {
-                id: "task_002".into(),
-                creator: "9Mz2...1Kp4".into(),
-                description: "Build Telegram bot for DAO voting notifications".into(),
-                reward_lamports: 250_000_000,
-                status: TaskStatus::Open,
-                claimer: None,
-                created_at: chrono::Utc::now().timestamp() - 7200,
-                deadline: None,
-            },
-        ];
-
-        let count = mock_tasks.len();
-
-        Ok(ExecutionResult {
-            success: true,
-            message: format!("Found {} open tasks.", count),
-            signature: None,
-            data: Some(serde_json::to_value(mock_tasks)?),
-        })
+                Ok(ExecutionResult {
+                    success: true,
+                    message: format!("Found {} open tasks on-chain.", count),
+                    signature: None,
+                    data: Some(serde_json::to_value(frontend_tasks)?),
+                })
+            }
+            Err(e) => {
+                info!("Failed to fetch on-chain tasks: {} — returning empty list", e);
+                Ok(ExecutionResult {
+                    success: true,
+                    message: "No open tasks found (or program not deployed on this network).".into(),
+                    signature: None,
+                    data: Some(serde_json::to_value(Vec::<AgencTask>::new())?),
+                })
+            }
+        }
     }
 
-    /// Get status of a specific task
+    /// Get status of a specific task from chain
     async fn get_task_status(&self, params: &serde_json::Value) -> Result<ExecutionResult> {
         let task_id: String = serde_json::from_value(
             params.get("task_id").cloned().unwrap_or_default()
@@ -373,14 +431,36 @@ impl SolanaExecutor {
 
         info!("Getting status for task: {}", task_id);
 
-        // TODO: Fetch from chain
-
-        Ok(ExecutionResult {
-            success: true,
-            message: format!("Task {} status: Open. Waiting for operator.", task_id),
-            signature: None,
-            data: None,
-        })
+        if let Ok(id) = task_id.parse::<u64>() {
+            match fetch_task_by_id(&self.rpc_client, id).await? {
+                Some(task) => Ok(ExecutionResult {
+                    success: true,
+                    message: format!(
+                        "Task #{}: {} | Reward: {:.4} SOL | Creator: {}...{}",
+                        task.task_id,
+                        task.state.label(),
+                        task.reward_sol(),
+                        &task.creator[..4],
+                        &task.creator[task.creator.len()-4..],
+                    ),
+                    signature: None,
+                    data: Some(serde_json::to_value(&task)?),
+                }),
+                None => Ok(ExecutionResult {
+                    success: false,
+                    message: format!("Task {} not found on-chain.", task_id),
+                    signature: None,
+                    data: None,
+                }),
+            }
+        } else {
+            Ok(ExecutionResult {
+                success: false,
+                message: "Invalid task ID — provide a numeric task ID.".into(),
+                signature: None,
+                data: None,
+            })
+        }
     }
 
     /// Get wallet balance
@@ -425,15 +505,24 @@ impl SolanaExecutor {
         })
     }
 
-    /// Get overall protocol state
+    /// Get overall protocol state from on-chain data
     async fn get_protocol_state(&self) -> Result<ExecutionResult> {
-        info!("Fetching protocol state...");
+        info!("Fetching protocol state from chain...");
 
-        // TODO: Aggregate from AgenC program
+        // Fetch open tasks to get count and TVL
+        let open_tasks = fetch_tasks_by_state(&self.rpc_client, OnChainTaskState::Open, 100).await
+            .unwrap_or_default();
+        let in_progress = fetch_tasks_by_state(&self.rpc_client, OnChainTaskState::InProgress, 100).await
+            .unwrap_or_default();
+
+        let tvl: u64 = open_tasks.iter().chain(in_progress.iter())
+            .map(|t| t.reward_lamports)
+            .sum();
+
         let state = ProtocolState {
-            open_task_count: 42,
-            total_value_locked_sol: 1337.5,
-            active_operators: 128,
+            open_task_count: open_tasks.len() as u64,
+            total_value_locked_sol: tvl as f64 / 1_000_000_000.0,
+            active_operators: in_progress.len() as u64,
             last_updated: chrono::Utc::now().timestamp(),
         };
 

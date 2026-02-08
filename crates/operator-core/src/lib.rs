@@ -11,6 +11,7 @@
 //! ============================================================================
 
 pub mod access;
+pub mod agenc_program;
 pub mod auth;
 pub mod db;
 pub mod executor;
