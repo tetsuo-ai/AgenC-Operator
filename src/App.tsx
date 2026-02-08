@@ -21,9 +21,12 @@ import StatusBar from './components/StatusBar';
 import WalletDropdown from './components/WalletDropdown';
 import HudPanel from './components/HudPanel';
 import TaskMarketplace from './components/TaskMarketplace';
+import BottomNav from './components/BottomNav';
+import type { Tab } from './components/BottomNav';
 
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
+import { isMobile } from './hooks/usePlatform';
 import { useAppStore } from './hooks/useAppStore';
 import { useAvatarStore } from './stores/avatarStore';
 import { getGlobalVisemeDriver } from './hooks/useVisemeDriver';
@@ -66,11 +69,17 @@ function App() {
     isHudOpen,
     toggleHud,
     isMarketplaceOpen,
+    setIsMarketplaceOpen,
     toggleMarketplace,
+    setIsHudOpen,
   } = useAppStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Mobile navigation state
+  const [mobileTab, setMobileTab] = useState<Tab>('chat');
+  const mobile = isMobile();
 
   // Camera state
   const currentCameraMode = useAvatarStore((s) => s.currentMode);
@@ -216,7 +225,10 @@ function App() {
   // Keyboard Shortcuts
   // ============================================================================
 
+  // Desktop keyboard shortcuts (C/H/M) — skipped on mobile
   useEffect(() => {
+    if (mobile) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if user is typing in an input
       const target = e.target as HTMLElement;
@@ -245,7 +257,15 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleCustomize, toggleHud, toggleMarketplace]);
+  }, [mobile, toggleCustomize, toggleHud, toggleMarketplace]);
+
+  // Mobile tab handler — sets panels directly (no toggles, avoids double-flip)
+  const handleMobileTabChange = useCallback((tab: Tab) => {
+    setMobileTab(tab);
+    setIsCustomizeOpen(tab === 'settings');
+    setIsMarketplaceOpen(tab === 'tasks');
+    setIsHudOpen(false);
+  }, [setIsCustomizeOpen, setIsMarketplaceOpen, setIsHudOpen]);
 
   // ============================================================================
   // Initialization (Non-Blocking)
@@ -344,7 +364,7 @@ function App() {
       <TitleBar />
 
       {/* Top Bar - Camera, Appearance & Wallet Dropdowns */}
-      <div className="absolute top-12 right-4 z-50 flex items-center gap-3">
+      <div className={`absolute ${mobile ? 'top-2' : 'top-12'} right-4 z-50 flex items-center gap-3`}>
         {/* Camera Cycle Button */}
         <button
           onClick={cycleCameraMode}
@@ -371,7 +391,7 @@ function App() {
 
       {/* HUD Panel Overlay (toggle with H) */}
       {isHudOpen && (
-        <div className="absolute top-12 left-4 z-40 w-80">
+        <div className={`absolute z-40 ${mobile ? 'inset-x-2 top-2' : 'top-12 left-4 w-80'}`}>
           <HudPanel
             title="SYSTEM STATUS"
             color="cyan"
@@ -381,9 +401,13 @@ function App() {
         </div>
       )}
 
-      {/* Task Marketplace Overlay (toggle with M) */}
+      {/* Task Marketplace Overlay (toggle with M on desktop, Tasks tab on mobile) */}
       {isMarketplaceOpen && (
-        <div className="absolute top-12 left-1/2 transform -translate-x-1/2 z-40 max-h-[80vh] overflow-y-auto">
+        <div className={`absolute z-40 overflow-y-auto ${
+          mobile
+            ? 'inset-0 top-0 bottom-14 p-2'
+            : 'top-12 left-1/2 transform -translate-x-1/2 max-h-[80vh]'
+        }`}>
           <TaskMarketplace
             wallet={wallet}
             onTaskAction={(action, taskId) => {
@@ -411,8 +435,8 @@ function App() {
           />
         </div>
 
-        {/* Voice Button — bottom center overlay */}
-        <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+        {/* Voice Button — bottom center, raised above BottomNav on mobile */}
+        <div className={`absolute left-1/2 transform -translate-x-1/2 z-20 ${mobile ? 'bottom-20' : 'bottom-8'}`}>
           <VoiceButton
             voiceState={voiceState}
             isConnected={isVoiceConnected}
@@ -420,26 +444,32 @@ function App() {
           />
         </div>
 
-        {/* Chat Panel — glass overlay on right */}
-        <div className="absolute right-0 top-0 bottom-0 w-[420px] z-30 flex flex-col p-4">
-          <ChatPanel
-            messages={messages}
-            voiceState={voiceState}
-            onSendMessage={sendTextMessage}
-          />
-        </div>
+        {/* Chat Panel — full-width on mobile, fixed sidebar on desktop */}
+        {(!mobile || mobileTab === 'chat') && (
+          <div className={`absolute right-0 top-0 bottom-0 z-30 flex flex-col p-4 ${
+            mobile ? 'left-0 w-full pb-20' : 'w-[420px]'
+          }`}>
+            <ChatPanel
+              messages={messages}
+              voiceState={voiceState}
+              onSendMessage={sendTextMessage}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Status Bar */}
-      <StatusBar
-        voiceState={voiceState}
-        isConnected={isVoiceConnected}
-        error={error}
-        network={agentStatus.network.toUpperCase()}
-      />
+      {/* Status Bar — hidden on mobile (BottomNav replaces it) */}
+      {!mobile && (
+        <StatusBar
+          voiceState={voiceState}
+          isConnected={isVoiceConnected}
+          error={error}
+          network={agentStatus.network.toUpperCase()}
+        />
+      )}
 
-      {/* Vignette Effect - Disabled for clean rendering */}
-      {/* <div className="absolute inset-0 pointer-events-none vignette" /> */}
+      {/* Mobile Bottom Navigation */}
+      <BottomNav activeTab={mobileTab} onTabChange={handleMobileTabChange} />
     </div>
   );
 }

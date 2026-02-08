@@ -9,8 +9,12 @@
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { motion } from 'framer-motion';
+import { isMobile } from '../hooks/usePlatform';
 
 export default function TitleBar() {
+  // Android handles its own window chrome — hide the custom title bar
+  if (isMobile()) return null;
+
   const appWindow = getCurrentWindow();
 
   const handleMinimize = () => appWindow.minimize();

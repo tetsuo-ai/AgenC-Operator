@@ -10,12 +10,21 @@ import { create } from 'zustand';
 import type { CameraPreset, CameraMode } from '../types';
 import type { RenderQualityLevel } from '../config/renderQuality';
 import { DEFAULT_QUALITY, QUALITY_PRESETS } from '../config/renderQuality';
+import { isMobile } from '../hooks/usePlatform';
 
 // Quality preset version — bump this to force-reset users to the new default
 // when preset values change significantly (e.g. bloom retuning).
 const QUALITY_VERSION = '2';
 
 function getInitialQuality(): RenderQualityLevel {
+  // Mobile devices default to 'low' for GPU/battery preservation
+  if (isMobile()) {
+    const cached = localStorage.getItem('tetsuo-render-quality') as RenderQualityLevel | null;
+    // Respect explicit user override on mobile, otherwise force low
+    if (cached && cached in QUALITY_PRESETS) return cached;
+    return 'low';
+  }
+
   const version = localStorage.getItem('tetsuo-render-quality-v');
   const cached = localStorage.getItem('tetsuo-render-quality') as RenderQualityLevel | null;
   if (version === QUALITY_VERSION && cached && cached in QUALITY_PRESETS) return cached;

@@ -32,7 +32,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "connect-src": "'self' wss://api.x.ai https://*.solana.com https://*.helius-rpc.com",
+        "connect-src": "'self' wss://api.x.ai https://*.solana.com https://*.helius-rpc.com ws://localhost:49200 wss://localhost:49200",
         "script-src": "'self' 'unsafe-inline'",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob:",
@@ -58,7 +58,10 @@
     ],
     "category": "Finance",
     "shortDescription": "Cyberpunk voice operator for AgenC Solana protocol",
-    "longDescription": "Tetsuo is a voice-controlled desktop operator for the AgenC Solana protocol. Features cyberpunk aesthetics, local-first security (keys never leave device), and natural voice commands for task management.",
+    "longDescription": "Tetsuo is a voice-controlled mobile and desktop operator for the AgenC Solana protocol. Features cyberpunk aesthetics, Mobile Wallet Adapter support, and natural voice commands for task management.",
+    "android": {
+      "minSdkVersion": 24
+    },
     "windows": {
       "wix": null,
       "nsis": null
