@@ -15,9 +15,9 @@ tauri-build = { workspace = true, features = [] }
 # Core operator logic
 operator-core = { path = "../crates/operator-core" }
 
-# Solana SDK + RPC client (for Pubkey type and mobile balance queries)
-solana-sdk = { workspace = true }
-solana-client = { workspace = true }
+# Solana SDK + RPC client (default-features = false to avoid transitive OpenSSL)
+solana-sdk = { workspace = true, default-features = false }
+solana-client = { workspace = true, default-features = false }
 
 # Tauri v2
 tauri = { workspace = true, features = ["tray-icon"] }
@@ -31,8 +31,8 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# HTTP client for API calls
-reqwest = { workspace = true }
+# HTTP client for API calls (rustls — no OpenSSL needed for Android)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 
 # Environment variable loading

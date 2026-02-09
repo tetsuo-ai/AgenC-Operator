@@ -19,13 +19,13 @@ uuid = { workspace = true }
 spl-associated-token-account = { workspace = true }
 spl-token = { workspace = true }
 
-# HTTP client for embeddings API
-reqwest = { workspace = true }
+# HTTP client for embeddings API (rustls — no OpenSSL needed for Android)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 
-# Solana
-solana-sdk = { workspace = true }
-solana-client = { workspace = true }
+# Solana (default-features = false to avoid transitive OpenSSL)
+solana-sdk = { workspace = true, default-features = false }
+solana-client = { workspace = true, default-features = false }
 
 # Audio (local voice processing) — gated behind "native-audio" feature for mobile builds
 cpal = { workspace = true, optional = true }
