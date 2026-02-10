@@ -16,14 +16,14 @@ use operator_core::{
     Memory, MemoryManager, MemoryType, UserContext,
     // Executors
     DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
-    JupiterSwapExecutor, TwitterExecutor,
+    JupiterSwapExecutor, TwitterExecutor, VideoExecutor,
     // Types for executors
     SwapParams, SwapQuote, TokenPrice, TweetResult,
-    DiscordResult, EmailResult, BulkEmailResult, ImageGenResult,
+    DiscordResult, EmailResult, BulkEmailResult, ImageGenResult, VideoGenResult,
     // Param types for intent routing
     CodeFixParams, CodeReviewParams, CodeGenerateParams, CodeExplainParams,
     TweetParams, ThreadParams, DiscordMessageParams, DiscordEmbedParams,
-    EmailParams, BulkEmailParams, ImageGenParams,
+    EmailParams, BulkEmailParams, ImageGenParams, VideoGenParams,
     CreateGistParams, CreateGitHubIssueParams, AddGitHubCommentParams, TriggerGitHubWorkflowParams,
     // Auth
     auth::{TwitterOAuth, TwitterTokens},
@@ -62,6 +62,8 @@ pub struct AppState {
     pub image_executor: Arc<RwLock<Option<ImageExecutor>>>,
     // Phase 4: GitHub executor
     pub github_executor: Arc<RwLock<Option<GitHubExecutor>>>,
+    // Phase 6: Video executor
+    pub video_executor: Arc<RwLock<Option<VideoExecutor>>>,
     // Phase 5: Embedded database
     pub db: Arc<RwLock<Option<OperatorDb>>>,
     // Session tracking
@@ -475,6 +477,9 @@ async fn execute_intent(
 
         // Image generation -> ImageExecutor
         IntentAction::GenerateImage => route_image(&state, &intent).await,
+
+        // Video generation -> VideoExecutor
+        IntentAction::GenerateVideo => route_video(&state, &intent).await,
 
         // GitHub operations -> GitHubExecutor
         IntentAction::CreateGist => route_create_gist(&state, &intent).await,
@@ -1262,6 +1267,58 @@ async fn route_image(
         None => Ok(AsyncResult::ok(ExecutionResult {
             success: false,
             message: "Image generator not configured. Set VITE_XAI_API_KEY in .env".into(),
+            signature: None,
+            data: None,
+        })),
+    }
+}
+
+/// Route video generation intent to VideoExecutor
+async fn route_video(
+    state: &State<'_, AppState>,
+    intent: &VoiceIntent,
+) -> Result<AsyncResult<ExecutionResult>, String> {
+    let video_executor = state.video_executor.read().await;
+
+    match video_executor.as_ref() {
+        Some(executor) => {
+            let params: VideoGenParams = match serde_json::from_value(intent.params.clone()) {
+                Ok(p) => p,
+                Err(e) => return Ok(AsyncResult::ok(ExecutionResult {
+                    success: false,
+                    message: format!("Invalid video params: {}", e),
+                    signature: None,
+                    data: None,
+                })),
+            };
+
+            let path = params.save_path.unwrap_or_else(|| {
+                format!("generated/{}.mp4", chrono::Utc::now().timestamp())
+            });
+
+            match executor.generate_and_save(
+                &params.prompt,
+                params.duration_sec,
+                params.aspect_ratio.as_deref(),
+                &path,
+            ).await {
+                Ok(result) => Ok(AsyncResult::ok(ExecutionResult {
+                    success: true,
+                    message: format!("Video generated: {} ({}s)", result.path, result.duration_sec),
+                    signature: None,
+                    data: Some(serde_json::to_value(&result).unwrap_or_default()),
+                })),
+                Err(e) => Ok(AsyncResult::ok(ExecutionResult {
+                    success: false,
+                    message: e.to_string(),
+                    signature: None,
+                    data: None,
+                })),
+            }
+        }
+        None => Ok(AsyncResult::ok(ExecutionResult {
+            success: false,
+            message: "Video generator not configured. Set VITE_XAI_API_KEY in .env".into(),
             signature: None,
             data: None,
         })),
@@ -2849,6 +2906,44 @@ async fn generate_image(
     }
 }
 
+/// Generate a video from a text prompt
+#[tauri::command]
+async fn generate_video(
+    state: State<'_, AppState>,
+    prompt: String,
+    duration_sec: Option<u32>,
+    aspect_ratio: Option<String>,
+    save_path: Option<String>,
+) -> Result<AsyncResult<VideoGenResult>, String> {
+    info!("[IPC] generate_video: {}...", &prompt[..prompt.len().min(50)]);
+
+    let video_executor = state.video_executor.read().await;
+
+    match video_executor.as_ref() {
+        Some(executor) => {
+            let path = save_path.unwrap_or_else(|| {
+                format!("generated/{}.mp4", chrono::Utc::now().timestamp())
+            });
+
+            match executor.generate_and_save(
+                &prompt,
+                duration_sec,
+                aspect_ratio.as_deref(),
+                &path,
+            ).await {
+                Ok(result) => {
+                    info!("[IPC] Video generated: {}", result.path);
+                    Ok(AsyncResult::ok(result))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err(
+            "Video generator not configured. Set VITE_XAI_API_KEY in .env",
+        )),
+    }
+}
+
 // ============================================================================
 // GitHub Commands
 // ============================================================================
@@ -3278,9 +3373,12 @@ async fn build_unsigned_transaction(
             if let Some(skr_amount) = parsed.reward_skr {
                 if skr_amount > 0.0 {
                     let (task_pda, _) = derive_task_pda(task_id_num);
-                    let deposit_ixs = build_skr_escrow_deposit_ix(
+                    let deposit_ixs = match build_skr_escrow_deposit_ix(
                         &payer, &task_pda, display_to_skr_tokens(skr_amount),
-                    );
+                    ) {
+                        Ok(ixs) => ixs,
+                        Err(e) => return Ok(AsyncResult::err(format!("SKR escrow error: {}", e))),
+                    };
                     ixs.extend(deposit_ixs);
                 }
             }
@@ -3514,6 +3612,12 @@ pub fn run() {
         ImageExecutor::new(api_key.clone())
     });
 
+    // Phase 6: Initialize Video executor (uses same Grok API key)
+    let video_executor = config.grok_api_key.as_ref().map(|api_key| {
+        info!("Video executor initialized with Grok API");
+        VideoExecutor::new(api_key.clone())
+    });
+
     // Phase 4: Initialize GitHub executor
     let github_executor = config.github_token.as_ref().map(|token| {
         info!("GitHub executor initialized with PAT");
@@ -3579,6 +3683,8 @@ pub fn run() {
         image_executor: Arc::new(RwLock::new(image_executor)),
         // Phase 4: GitHub executor
         github_executor: Arc::new(RwLock::new(github_executor)),
+        // Phase 6: Video executor
+        video_executor: Arc::new(RwLock::new(video_executor)),
         // Phase 5: Embedded database
         db: Arc::new(RwLock::new(operator_db)),
         // Session tracking
@@ -3650,6 +3756,8 @@ pub fn run() {
             send_bulk_email,
             // Image generation (Phase 3)
             generate_image,
+            // Video generation (Phase 6)
+            generate_video,
             // GitHub operations (Phase 4)
             create_gist,
             create_github_issue,

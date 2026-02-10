@@ -41,6 +41,8 @@ export type IntentAction =
   | 'send_bulk_email'
   // Image Generation (Pro tier)
   | 'generate_image'
+  // Video Generation (Pro tier)
+  | 'generate_video'
   // System
   | 'help'
   | 'unknown';
@@ -252,6 +254,24 @@ export interface ImageGenResult {
 
 export interface ImageGenParams {
   prompt: string;
+  save_path?: string;
+}
+
+// ============================================================================
+// Video Generation Types (Phase 6)
+// ============================================================================
+
+export interface VideoGenResult {
+  path: string;
+  duration_sec: number;
+  format: string; // "mp4"
+  url?: string;
+}
+
+export interface VideoGenParams {
+  prompt: string;
+  duration_sec?: number; // 1-15, default 10
+  aspect_ratio?: string; // default "16:9"
   save_path?: string;
 }
 

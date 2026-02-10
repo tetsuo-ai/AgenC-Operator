@@ -45,10 +45,10 @@ Thumbs.db
 src-tauri/target/
 src-tauri/WixTools/
 
-# Whisper models (large files)
-models/
+# Whisper models (large binary files — not the 3D avatar in public/models/)
 *.bin
 *.ggml
+*.onnx
 
 # Test & Coverage
 coverage/

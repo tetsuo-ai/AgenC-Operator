@@ -17,6 +17,9 @@ use super::types::{AccessTier, AccessTierInfo, Feature, TETSUO_DECIMALS};
 /// Default cache duration in seconds (5 minutes)
 pub const DEFAULT_CACHE_DURATION_SECS: i64 = 300;
 
+/// Maximum number of entries in the tier cache to prevent unbounded growth
+const MAX_CACHE_SIZE: usize = 1000;
+
 /// Cached tier information
 #[derive(Debug, Clone)]
 struct CachedTier {
@@ -76,6 +79,16 @@ impl AccessGate {
         // Update cache
         {
             let mut cache = self.tier_cache.write().await;
+            // Evict oldest entry if cache is at capacity
+            if cache.len() >= MAX_CACHE_SIZE {
+                if let Some(oldest_key) = cache
+                    .iter()
+                    .min_by_key(|(_, v)| v.cached_at)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.remove(&oldest_key);
+                }
+            }
             cache.insert(
                 wallet_str.clone(),
                 CachedTier {

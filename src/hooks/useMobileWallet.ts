@@ -39,6 +39,13 @@ interface MobileWalletState {
   balanceSol: number;
 }
 
+interface MWAWallet {
+  authorize(opts: { identity: typeof APP_IDENTITY; cluster: string }): Promise<AuthorizationResult>;
+  reauthorize(opts: { identity: typeof APP_IDENTITY; auth_token: string }): Promise<AuthorizationResult>;
+  signAndSendTransactions(opts: { payloads: string[]; options?: Record<string, unknown> }): Promise<Readonly<{ signatures: string[] }>>;
+  signTransactions(opts: { payloads: string[]; }): Promise<Readonly<{ signed_payloads: string[] }>>;
+}
+
 const APP_IDENTITY = {
   name: 'AgenC Operator',
   uri: 'https://agenc.ai',
@@ -69,7 +76,7 @@ export function useMobileWallet() {
 
     let walletInfo: WalletInfo = { address: '', balance_sol: 0, is_connected: false };
 
-    await transact(async (wallet: any) => {
+    await transact(async (wallet: MWAWallet) => {
       const result: AuthorizationResult = await wallet.authorize({
         identity: APP_IDENTITY,
         cluster: 'mainnet-beta',
@@ -122,7 +129,7 @@ export function useMobileWallet() {
 
     let signature = '';
 
-    await transact(async (wallet: any) => {
+    await transact(async (wallet: MWAWallet) => {
       // Re-authorize with cached token
       const authToken = stateRef.current.authToken;
       if (authToken) {
@@ -149,12 +156,13 @@ export function useMobileWallet() {
         }));
       }
 
-      // Sign and send
+      // Sign and send — MWA expects base64-encoded payloads
+      const payload = btoa(String.fromCharCode(...serializedTx));
       const result = await wallet.signAndSendTransactions({
-        transactions: [serializedTx],
+        payloads: [payload],
       });
 
-      signature = result[0] ?? '';
+      signature = result.signatures[0] ?? '';
     });
 
     return signature;
@@ -172,7 +180,7 @@ export function useMobileWallet() {
 
     let signed: Uint8Array = new Uint8Array();
 
-    await transact(async (wallet: any) => {
+    await transact(async (wallet: MWAWallet) => {
       const authToken = stateRef.current.authToken;
       if (authToken) {
         try {
@@ -182,11 +190,17 @@ export function useMobileWallet() {
         }
       }
 
+      // MWA expects base64-encoded payloads
+      const payload = btoa(String.fromCharCode(...serializedTx));
       const result = await wallet.signTransactions({
-        transactions: [serializedTx],
+        payloads: [payload],
       });
 
-      signed = result[0] ?? new Uint8Array();
+      // Decode base64 signed payload back to Uint8Array
+      const signedPayload = result.signed_payloads[0] ?? '';
+      signed = signedPayload
+        ? Uint8Array.from(atob(signedPayload), c => c.charCodeAt(0))
+        : new Uint8Array();
     });
 
     return signed;

@@ -67,6 +67,9 @@ base64 = "0.22"
 # Transaction serialization
 bincode = "1.3"
 
+# Lazy static initialization
+once_cell = "1.19"
+
 # Embedded database
 redb = { workspace = true }
 

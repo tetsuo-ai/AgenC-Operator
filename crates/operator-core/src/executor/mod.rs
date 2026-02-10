@@ -20,6 +20,7 @@ mod image;
 mod jupiter_swap;
 mod slack;
 mod twitter;
+mod video;
 
 pub use discord::DiscordExecutor;
 pub use email::EmailExecutor;
@@ -29,3 +30,4 @@ pub use image::ImageExecutor;
 pub use jupiter_swap::JupiterSwapExecutor;
 pub use slack::{SlackExecutor, SlackResult, Block, PlainText, MrkdwnText, ContextElement};
 pub use twitter::TwitterExecutor;
+pub use video::VideoExecutor;

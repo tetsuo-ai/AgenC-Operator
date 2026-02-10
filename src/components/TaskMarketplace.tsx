@@ -61,7 +61,7 @@ export default function TaskMarketplace({
           addToast({
             type: 'info',
             title: `${added.length} new task${added.length > 1 ? 's' : ''}`,
-            message: added[0]?.description.slice(0, 60),
+            message: added[0]?.description?.slice(0, 60) ?? 'New task',
           });
         }
       }

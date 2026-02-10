@@ -13,7 +13,7 @@
     "tauri:build": "tauri build",
     "lint": "eslint src --ext ts,tsx",
     "typecheck": "tsc --noEmit",
-    "optimize-model": "gltf-transform optimize public/models/agencfinalformr.glb public/models/agencfinalformr.glb --compress draco --texture-compress ktx2"
+    "optimize-model": "gltf-transform optimize public/models/agencfinalformr.glb public/models/agencfinalformr.glb --compress draco --texture-compress false && gltf-transform webp public/models/agencfinalformr.glb public/models/agencfinalformr.glb --quality 90"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
