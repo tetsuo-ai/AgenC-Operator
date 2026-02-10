@@ -80,5 +80,7 @@ spl-token = "6.0"
 # CLI parsing
 clap = { version = "4.4", features = ["derive"] }
 
-# OpenSSL vendored for cross-compilation (Android)
-openssl = { version = "0.10", features = ["vendored"] }
+# Patch out OpenSSL: replace solana-secp256r1-program with a local stub
+# that doesn't require OpenSSL (our app never verifies secp256r1 signatures)
+[patch.crates-io]
+solana-secp256r1-program = { path = "crates/solana-secp256r1-program" }
