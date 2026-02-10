@@ -83,7 +83,7 @@ const CONFIG = {
   RIM_LIGHT_COLOR: '#ffe8d6',
   FACE_SPOT_INTENSITY: 0.08,      // Very subtle face spotlight
   FACE_SPOT_COLOR: '#fff5e6',
-  AMBIENT_INTENSITY: 0.05,        // Minimal ambient — IBL provides fill
+  AMBIENT_INTENSITY: 0.12,        // Slightly higher ambient for mobile fallback
   ENVIRONMENT_PRESET: 'apartment' as const,
   ENVIRONMENT_INTENSITY: 0.15,    // Low IBL — main source of diffuse light
   TONE_MAPPING_EXPOSURE: 0.55,    // Aggressive reduction to prevent blowout
@@ -300,7 +300,7 @@ interface ReactiveModelProps {
 }
 
 function ReactiveModel({ appearance, status }: ReactiveModelProps) {
-  const gltf = useGLTF(MODEL_PATH);
+  const gltf = useGLTF(MODEL_PATH, true);
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
@@ -1283,7 +1283,7 @@ export default function TetsuoAvatar3D({
 export function preloadModel() {
   try {
     log.info("[TetsuoAvatar3D] Preloading model: " + MODEL_PATH);
-    useGLTF.preload(MODEL_PATH);
+    useGLTF.preload(MODEL_PATH, true);
   } catch (e) {
     log.warn("[TetsuoAvatar3D] Failed to preload model: " + e);
   }

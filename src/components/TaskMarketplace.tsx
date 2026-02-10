@@ -176,9 +176,9 @@ export default function TaskMarketplace({
   return (
     <motion.div
       className="cyber-panel overflow-hidden border-neon-cyan/30 w-full max-w-2xl"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+      initial={{ opacity: 0, y: 24, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
     >
       {/* Header */}
       <div className="px-4 py-3 border-b border-neon-cyan/30 bg-gradient-to-r from-neon-cyan/5 to-transparent">

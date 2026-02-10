@@ -10,6 +10,7 @@
 
 import { motion } from 'framer-motion';
 import { isMobile } from '../hooks/usePlatform';
+import { hapticLight } from '../utils/haptics';
 
 type Tab = 'chat' | 'tasks' | 'settings';
 
@@ -67,36 +68,52 @@ export default function BottomNav({ activeTab, onTabChange, taskCount }: BottomN
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
-            <button
+            <motion.button
               key={tab.id}
-              onClick={() => onTabChange(tab.id)}
+              onClick={() => { hapticLight(); onTabChange(tab.id); }}
               className="flex flex-col items-center justify-center flex-1 h-full relative"
               aria-label={tab.label}
+              whileTap={{ scale: 0.9 }}
+              transition={{ duration: 0.1 }}
             >
               {isActive && (
                 <motion.div
                   className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-white"
                   layoutId="bottomnav-indicator"
-                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 30, mass: 0.8 }}
                 />
               )}
-              <span className={`relative ${isActive ? 'text-white' : 'text-white/40'}`}>
+              <motion.span
+                className="relative"
+                animate={{
+                  scale: isActive ? 1 : 0.9,
+                  color: isActive ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.4)',
+                }}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              >
                 {tab.icon}
                 {tab.id === 'tasks' && (taskCount ?? 0) > 0 && !isActive && (
-                  <span className="absolute -top-1 -right-2 min-w-[14px] h-[14px] flex items-center justify-center
-                    rounded-full bg-neon-cyan text-black text-[8px] font-bold px-0.5">
+                  <motion.span
+                    className="absolute -top-1 -right-2 min-w-[14px] h-[14px] flex items-center justify-center
+                      rounded-full bg-neon-cyan text-black text-[8px] font-bold px-0.5"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+                  >
                     {taskCount! > 99 ? '99+' : taskCount}
-                  </span>
+                  </motion.span>
                 )}
-              </span>
-              <span
-                className={`text-[9px] mt-0.5 font-display tracking-widest ${
-                  isActive ? 'text-white' : 'text-white/40'
-                }`}
+              </motion.span>
+              <motion.span
+                className="text-[9px] mt-0.5 font-display tracking-widest"
+                animate={{
+                  color: isActive ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.4)',
+                }}
+                transition={{ duration: 0.2 }}
               >
                 {tab.label}
-              </span>
-            </button>
+              </motion.span>
+            </motion.button>
           );
         })}
       </div>

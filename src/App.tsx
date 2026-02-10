@@ -9,7 +9,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { TetsuoAPI } from './api';
+import { hapticLight, hapticMedium } from './utils/haptics';
 
 // Components
 import TetsuoAvatar from './components/TetsuoAvatar';
@@ -101,6 +103,7 @@ function App() {
   ];
 
   const cycleCameraMode = useCallback(() => {
+    hapticLight();
     const modes: CameraMode[] = ['face', 'bust', 'closeup', 'waist', 'full-body', 'presentation'];
     const currentIdx = modes.indexOf(currentCameraMode);
     const nextIdx = (currentIdx + 1) % modes.length;
@@ -373,6 +376,7 @@ function App() {
   // ============================================================================
 
   const handleVoiceToggle = useCallback(() => {
+    hapticMedium();
     if (voiceState === 'listening') {
       stopListening();
     } else if (voiceState === 'idle' || voiceState === 'error') {
@@ -410,38 +414,60 @@ function App() {
       <TitleBar />
 
       {/* Top Bar - Camera, Appearance & Wallet Dropdowns */}
-      <div className={`absolute ${mobile ? 'top-2' : 'top-12'} right-4 z-50 flex items-center gap-3`}>
+      <motion.div
+        className={`absolute z-50 flex items-center ${mobile ? 'left-4 right-4 gap-2' : 'right-4 top-12 gap-3'}`}
+        style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 28px)' } : undefined}
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
+      >
         {/* Camera Cycle Button */}
-        <button
+        <motion.button
           onClick={cycleCameraMode}
-          className="flex items-center gap-2 px-3 py-2 rounded border bg-black/80 border-white/20 text-white/60 hover:border-white/40 hover:text-white transition-all backdrop-blur-sm"
+          className={`flex items-center gap-1.5 rounded border bg-black/80 border-white/20 text-white/60 hover:border-white/40 hover:text-white transition-colors backdrop-blur-sm ${mobile ? 'flex-1 min-w-0 justify-center px-2 py-2' : 'px-3 py-2'}`}
           aria-label="Cycle camera view"
           title={`Camera: ${CAMERA_MODES.find(m => m.mode === currentCameraMode)?.label}`}
+          whileTap={{ scale: 0.95 }}
+          transition={{ duration: 0.1 }}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-          <span className="text-xs font-display uppercase tracking-wider">
+          <span className={`font-display uppercase tracking-wider truncate ${mobile ? 'text-[10px]' : 'text-xs'}`}>
             {CAMERA_MODES.find(m => m.mode === currentCameraMode)?.label}
           </span>
-        </button>
-        {/* Appearance Dropdown */}
-        <AppearanceMenu
-          isOpen={isCustomizeOpen}
-          onClose={() => setIsCustomizeOpen(false)}
-          onToggle={toggleCustomize}
-        />
+        </motion.button>
+        {/* Appearance Dropdown — desktop only (mobile uses Settings tab overlay below) */}
+        {!mobile && (
+          <AppearanceMenu
+            isOpen={isCustomizeOpen}
+            onClose={() => setIsCustomizeOpen(false)}
+            onToggle={toggleCustomize}
+          />
+        )}
         {/* Wallet Dropdown */}
         <WalletDropdown
           wallet={wallet}
           onMobileConnect={handleMobileWalletConnect}
           onMobileDisconnect={handleMobileWalletDisconnect}
         />
-      </div>
+      </motion.div>
+
+      {/* Mobile Settings — AppearanceMenu sidebar overlay */}
+      {mobile && isCustomizeOpen && (
+        <AppearanceMenu
+          isOpen={true}
+          onClose={() => setIsCustomizeOpen(false)}
+          onToggle={toggleCustomize}
+        />
+      )}
 
       {/* HUD Panel Overlay (toggle with H) */}
       {isHudOpen && (
-        <div className={`absolute z-40 ${mobile ? 'inset-x-2 top-2' : 'top-12 left-4 w-80'}`}>
+        <div
+          className={`absolute z-40 ${mobile ? 'inset-x-2' : 'top-12 left-4 w-80'}`}
+          style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 8px)' } : undefined}
+        >
           <HudPanel
             title="SYSTEM STATUS"
             color="cyan"
@@ -453,11 +479,14 @@ function App() {
 
       {/* Task Marketplace Overlay (toggle with M on desktop, Tasks tab on mobile) */}
       {isMarketplaceOpen && (
-        <div className={`absolute z-40 overflow-y-auto ${
-          mobile
-            ? 'inset-0 top-0 bottom-14 p-2'
-            : 'top-12 left-1/2 transform -translate-x-1/2 max-h-[80vh]'
-        }`}>
+        <div
+          className={`absolute z-40 overflow-y-auto ${
+            mobile
+              ? 'inset-0 bottom-14 p-2 bg-black/95'
+              : 'top-12 left-1/2 transform -translate-x-1/2 max-h-[80vh]'
+          }`}
+          style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 72px)' } : undefined}
+        >
           <TaskMarketplace
             wallet={wallet}
             onTaskCountChange={setTaskCount}
@@ -486,20 +515,26 @@ function App() {
           />
         </div>
 
-        {/* Voice Button — bottom center, raised above BottomNav on mobile */}
-        <div className={`absolute left-1/2 transform -translate-x-1/2 z-20 ${mobile ? 'bottom-20' : 'bottom-8'}`}>
-          <VoiceButton
-            voiceState={voiceState}
-            isConnected={isVoiceConnected}
-            onClick={handleVoiceToggle}
-          />
-        </div>
+        {/* Voice Button — bottom center, above chat panel and BottomNav */}
+        {/* Hidden on mobile when Tasks or Settings tab is active to avoid overlap */}
+        {(!mobile || mobileTab === 'chat') && (
+          <div className={`absolute left-1/2 transform -translate-x-1/2 z-40 ${mobile ? 'bottom-20' : 'bottom-8'}`}>
+            <VoiceButton
+              voiceState={voiceState}
+              isConnected={isVoiceConnected}
+              onClick={handleVoiceToggle}
+            />
+          </div>
+        )}
 
         {/* Chat Panel — full-width on mobile, fixed sidebar on desktop */}
         {(!mobile || mobileTab === 'chat') && (
-          <div className={`absolute right-0 top-0 bottom-0 z-30 flex flex-col p-4 ${
-            mobile ? 'left-0 w-full pb-20' : 'w-[420px]'
-          }`}>
+          <div
+            className={`absolute right-0 bottom-0 z-30 flex flex-col p-4 ${
+              mobile ? 'left-0 w-full pb-36' : 'top-0 w-[420px]'
+            }`}
+            style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 72px)' } : undefined}
+          >
             <ChatPanel
               messages={messages}
               voiceState={voiceState}

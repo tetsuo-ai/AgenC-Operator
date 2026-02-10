@@ -42,7 +42,7 @@ export const QUALITY_PRESETS: Record<RenderQualityLevel, RenderQualityConfig> = 
     vignetteDarkness: 0,
     vignetteOffset: 0,
     smaa: false,
-    environmentMap: false,
+    environmentMap: true,
   },
   medium: {
     label: 'Medium',
