@@ -651,7 +651,7 @@ export const CodeAPI = {
 // Swap API (Jupiter Trading)
 // ============================================================================
 
-import type { SwapQuote, TokenPrice, TweetResult, DiscordResult, EmailResult, BulkEmailResult, ImageGenResult } from '../types';
+import type { SwapQuote, TokenPrice, TweetResult, DiscordResult, EmailResult, BulkEmailResult, ImageGenResult, VideoGenResult } from '../types';
 
 export const SwapAPI = {
   /**
@@ -875,6 +875,30 @@ export const ImageAPI = {
       .catch((err) => {
         console.error('[API] generateImage failed:', err);
         throw new TetsuoAPIError(`Image generation failed: ${err}`);
+      });
+  },
+};
+
+// ============================================================================
+// Video Generation API (Grok Imagine)
+// ============================================================================
+
+export const VideoAPI = {
+  /**
+   * Generate a video from a text prompt
+   * @param prompt - Description of the video to generate
+   * @param durationSec - Duration in seconds (1-15, default 10)
+   * @param aspectRatio - Aspect ratio (default "16:9")
+   * @param savePath - Optional path to save the video (default: generated/<timestamp>.mp4)
+   */
+  generate(prompt: string, durationSec?: number, aspectRatio?: string, savePath?: string): Promise<VideoGenResult> {
+    return invoke<AsyncResult<VideoGenResult>>('generate_video', {
+      prompt, durationSec, aspectRatio, savePath,
+    })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] generateVideo failed:', err);
+        throw new TetsuoAPIError(`Video generation failed: ${err}`);
       });
   },
 };
@@ -1208,6 +1232,8 @@ export const TetsuoAPI = {
   discord: DiscordAPI,
   email: EmailAPI,
   image: ImageAPI,
+  // Phase 6 APIs
+  video: VideoAPI,
   // Phase 4 APIs
   github: GitHubAPI,
   // Phase 5: Database

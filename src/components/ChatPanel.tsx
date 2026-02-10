@@ -288,6 +288,33 @@ function ChatBubble({ message }: ChatBubbleProps) {
                   </div>
                 );
               })()}
+              {/* Inline video display for generated videos */}
+              {(() => {
+                const data = message.result?.data;
+                if (!data || typeof data !== 'object') return null;
+                const rec = data as Record<string, unknown>;
+                const videoUrl = rec.url as string | undefined;
+                const format = rec.format as string | undefined;
+                const durationSec = rec.duration_sec as number | undefined;
+                if (!videoUrl || (format !== 'mp4' && !durationSec)) return null;
+                return (
+                  <div className="mt-2 pt-2 border-t border-holo-silver/20">
+                    <video
+                      controls
+                      autoPlay
+                      muted
+                      loop
+                      className="max-w-full rounded border border-holo-silver/20"
+                      style={{ maxHeight: '300px' }}
+                    >
+                      <source src={videoUrl} type="video/mp4" />
+                    </video>
+                    <div className="text-[10px] text-holo-silver/40 mt-1">
+                      AI Generated Video{durationSec ? ` \u2022 ${durationSec}s` : ''}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>

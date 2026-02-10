@@ -63,6 +63,9 @@ pub enum IntentAction {
     // Image Generation (Pro tier)
     GenerateImage,
 
+    // Video Generation (Pro tier)
+    GenerateVideo,
+
     // GitHub Operations (Pro tier)
     CreateGist,
     CreateGitHubIssue,
@@ -106,6 +109,9 @@ impl IntentAction {
 
             // Image generation - Pro tier
             IntentAction::GenerateImage => Some(Feature::ImageGen),
+
+            // Video generation - Pro tier (uses same feature gate as images)
+            IntentAction::GenerateVideo => Some(Feature::ImageGen),
 
             // Blockchain operations - no feature gating (policy gate handles these)
             _ => None,
@@ -451,6 +457,34 @@ pub struct ImageGenResult {
     /// Base64-encoded PNG image data for inline display
     #[serde(skip_serializing_if = "Option::is_none")]
     pub b64_data: Option<String>,
+}
+
+// ============================================================================
+// Video Generation Types
+// ============================================================================
+
+/// Parameters for generating a video
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoGenParams {
+    pub prompt: String,
+    /// Duration in seconds (1-15, default 10)
+    #[serde(default)]
+    pub duration_sec: Option<u32>,
+    /// Aspect ratio (default "16:9")
+    #[serde(default)]
+    pub aspect_ratio: Option<String>,
+    #[serde(default)]
+    pub save_path: Option<String>,
+}
+
+/// Result from video generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoGenResult {
+    pub path: String,
+    pub duration_sec: u32,
+    pub format: String, // "mp4"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 // ============================================================================

@@ -231,12 +231,13 @@ impl PolicyGate {
             }
 
             // Phase 3: Image Generation (Pro tier) - no confirmation needed
-            IntentAction::GenerateImage => {
+            IntentAction::GenerateImage |
+            IntentAction::GenerateVideo => {
                 PolicyCheck {
                     allowed: true,
                     requires_confirmation: false,
                     confirmation_type: ConfirmationType::None,
-                    reason: "Image generation (Pro tier required)".into(),
+                    reason: "Image/Video generation (Pro tier required)".into(),
                 }
             }
 
