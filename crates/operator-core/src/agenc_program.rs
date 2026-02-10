@@ -11,6 +11,7 @@
 //! ============================================================================
 
 use anyhow::{anyhow, Result};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_sdk::{
@@ -50,12 +51,20 @@ pub const DEFAULT_FEE_PERCENT: f64 = 1.0;
 /// Lamports per SOL
 pub const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
+static PROGRAM_ID_PUBKEY: Lazy<Pubkey> = Lazy::new(|| {
+    Pubkey::from_str(PROGRAM_ID).expect("Invalid AgenC program ID — this is a compile-time constant")
+});
+
+static SKR_MINT_PUBKEY: Lazy<Pubkey> = Lazy::new(|| {
+    Pubkey::from_str(SKR_MINT).expect("Invalid SKR mint — this is a compile-time constant")
+});
+
 pub fn program_id() -> Pubkey {
-    Pubkey::from_str(PROGRAM_ID).expect("Invalid AgenC program ID")
+    *PROGRAM_ID_PUBKEY
 }
 
 pub fn skr_mint() -> Pubkey {
-    Pubkey::from_str(SKR_MINT).expect("Invalid SKR mint")
+    *SKR_MINT_PUBKEY
 }
 
 /// Get the Associated Token Account (ATA) for a wallet's SKR holdings.
@@ -348,7 +357,7 @@ pub fn build_skr_escrow_deposit_ix(
     creator: &Pubkey,
     task_pda: &Pubkey,
     skr_amount: u64,
-) -> Vec<Instruction> {
+) -> Result<Vec<Instruction>> {
     let creator_skr_ata = get_skr_ata(creator);
     let escrow_skr_ata = get_skr_escrow_ata(task_pda);
     let (escrow_pda, _) = derive_escrow_pda(task_pda);
@@ -376,10 +385,10 @@ pub fn build_skr_escrow_deposit_ix(
             &[],                 // no multisig
             skr_amount,
         )
-        .expect("Failed to build SPL transfer instruction"),
+        .map_err(|e| anyhow!("Failed to build SPL transfer instruction: {}", e))?,
     );
 
-    ixs
+    Ok(ixs)
 }
 
 /// Build instructions to release SKR tokens from escrow to the worker on task completion.
@@ -391,7 +400,7 @@ pub fn build_skr_escrow_release_ix(
     task_pda: &Pubkey,
     worker: &Pubkey,
     skr_amount: u64,
-) -> Vec<Instruction> {
+) -> Result<Vec<Instruction>> {
     let escrow_skr_ata = get_skr_escrow_ata(task_pda);
     let worker_skr_ata = get_skr_ata(worker);
     let (escrow_pda, _) = derive_escrow_pda(task_pda);
@@ -422,10 +431,10 @@ pub fn build_skr_escrow_release_ix(
             &[],
             skr_amount,
         )
-        .expect("Failed to build SPL transfer instruction"),
+        .map_err(|e| anyhow!("Failed to build SPL transfer instruction: {}", e))?,
     );
 
-    ixs
+    Ok(ixs)
 }
 
 /// Build a `claim_task` instruction.

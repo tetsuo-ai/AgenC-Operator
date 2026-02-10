@@ -195,6 +195,14 @@ impl SolanaExecutor {
                 data: None,
             }),
 
+            // Phase 6: Video generation handled by VideoExecutor
+            IntentAction::GenerateVideo => Ok(ExecutionResult {
+                success: false,
+                message: "Video generation is handled by VideoExecutor".into(),
+                signature: None,
+                data: None,
+            }),
+
             // GitHub operations handled by GitHubExecutor
             IntentAction::CreateGist |
             IntentAction::CreateGitHubIssue |
@@ -293,7 +301,7 @@ impl SolanaExecutor {
                 &keypair.pubkey(),
                 &task_pda,
                 skr_tokens,
-            );
+            )?;
             instructions.extend(deposit_ixs);
         }
 

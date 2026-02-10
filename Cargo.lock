@@ -4578,6 +4578,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "hmac 0.12.1",
+ "once_cell",
  "percent-encoding",
  "qdrant-client",
  "rand 0.8.5",
