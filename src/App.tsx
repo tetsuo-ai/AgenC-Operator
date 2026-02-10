@@ -85,6 +85,7 @@ function App() {
   const [mobileTab, setMobileTab] = useState<Tab>('chat');
   const [taskCount, setTaskCount] = useState(0);
   const mobile = isMobile();
+  const [isFeedOpen, setIsFeedOpen] = useState(false);
 
   // Mobile Wallet Adapter (MWA) — only active on Android
   const mobileWallet = useMobileWallet();
@@ -518,7 +519,7 @@ function App() {
         {/* Voice Button — bottom center, above chat panel and BottomNav */}
         {/* Hidden on mobile when Tasks or Settings tab is active to avoid overlap */}
         {(!mobile || mobileTab === 'chat') && (
-          <div className={`absolute left-1/2 transform -translate-x-1/2 z-40 ${mobile ? 'bottom-20' : 'bottom-8'}`}>
+          <div className={`absolute left-1/2 transform -translate-x-1/2 z-40 ${mobile ? 'bottom-28' : 'bottom-8'}`}>
             <VoiceButton
               voiceState={voiceState}
               isConnected={isVoiceConnected}
@@ -527,8 +528,8 @@ function App() {
           </div>
         )}
 
-        {/* Chat Panel — full-width on mobile, fixed sidebar on desktop */}
-        {(!mobile || mobileTab === 'chat') && (
+        {/* Chat Panel — full-width on mobile (hidden by default, toggle with button), fixed sidebar on desktop */}
+        {(!mobile || (mobileTab === 'chat' && isFeedOpen)) && (
           <div
             className={`absolute right-0 bottom-0 z-30 flex flex-col p-4 ${
               mobile ? 'left-0 w-full pb-36' : 'top-0 w-[420px]'
@@ -541,6 +542,27 @@ function App() {
               onSendMessage={sendTextMessage}
             />
           </div>
+        )}
+
+        {/* Mobile Feed Toggle Button — bottom-left, shows/hides operator feed */}
+        {mobile && mobileTab === 'chat' && (
+          <motion.button
+            onClick={() => { hapticLight(); setIsFeedOpen(prev => !prev); }}
+            className={`absolute bottom-32 left-4 z-40 flex items-center gap-1.5 rounded-full border px-3 py-2 backdrop-blur-sm transition-colors ${
+              isFeedOpen
+                ? 'bg-white/10 border-white/30 text-white/80'
+                : 'bg-black/60 border-white/20 text-white/50 hover:border-white/40'
+            }`}
+            whileTap={{ scale: 0.9 }}
+            transition={{ duration: 0.1 }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <span className="text-[10px] font-display uppercase tracking-wider">
+              {isFeedOpen ? 'Hide' : 'Feed'}
+            </span>
+          </motion.button>
         )}
       </div>
 

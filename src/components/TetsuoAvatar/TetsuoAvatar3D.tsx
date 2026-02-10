@@ -47,6 +47,7 @@ import { log } from "../../utils/log";
 import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
 import { FacsMorphController, logAllMorphs } from "../../utils/dazMorphMap";
+import { isMobile } from "../../hooks/usePlatform";
 
 const MODEL_PATH = MODEL_CONFIG.path;
 
@@ -91,6 +92,18 @@ const CONFIG = {
   // Debug
   DEBUG_ANIMATIONS: false,        // Log animation state (enable for troubleshooting)
 } as const;
+
+// ============================================================================
+// Mobile Material Override
+// ============================================================================
+// Android WebView GPU can't handle the Genesis 9 model's textures.
+// On mobile, we strip ALL textures and force category-based colors directly.
+// This produces a clean colored mannequin look that's recognizable and performs well.
+
+// DISABLED: Mobile material override — testing with original textures
+// /** Colors applied to each material category on mobile (no textures) */
+// const MOBILE_COLORS = { ... };
+// function applyMobileMaterialOverride(scene: THREE.Object3D): void { ... }
 
 // ============================================================================
 // Props Interface
@@ -177,10 +190,11 @@ function applyAppearance(
 
         const category = categorizeMesh(child.name, mat.name);
         const meshMatName2 = `${child.name} ${mat.name || ''}`.toLowerCase();
+
         ref = {
           material: cloned,
           category,
-          originalColor: mat.color.clone(),
+          originalColor: cloned.color.clone(),
           originalEmissive: mat.emissive?.clone() || new THREE.Color(0),
           isEyeballTexture: category === 'eye' && /sclera|iris/i.test(meshMatName2) && !!cloned.map,
           originalEmissiveIntensity: mat.emissiveIntensity ?? 0,
@@ -300,7 +314,7 @@ interface ReactiveModelProps {
 }
 
 function ReactiveModel({ appearance, status }: ReactiveModelProps) {
-  const gltf = useGLTF(MODEL_PATH, true);
+  const gltf = useGLTF(MODEL_PATH, '/draco/');
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
@@ -473,6 +487,18 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
         log.info(`[TetsuoAvatar3D] TEMP: Hidden Sketchfab_model (hair)`);
       }
     });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MOBILE MATERIAL OVERRIDE
+    // Strip ALL textures and force category-based colors on mobile.
+    // This prevents the white blob caused by GPU memory exhaustion.
+    // Must run BEFORE the general material fix pass below.
+    // ═══════════════════════════════════════════════════════════════════════
+    // DISABLED: Mobile material override — testing with original textures
+    // if (isMobile()) {
+    //   log.info('[TetsuoAvatar3D] Mobile detected — applying material override (no textures, forced colors)');
+    //   applyMobileMaterialOverride(clone);
+    // }
 
     // Scale model from meters to centimeters.
     // The GLB is authored in meters (1.70m tall) but the camera system
@@ -1176,6 +1202,12 @@ export default function TetsuoAvatar3D({
   const isTransitioning = useAvatarStore((state) => state.isTransitioning);
   const renderQuality = useAvatarStore((state) => state.renderQuality);
   const qc = QUALITY_PRESETS[renderQuality];
+  const mobile = isMobile();
+
+  // On mobile, use reduced lighting to prevent overexposure on flat-colored materials
+  const lightScale = mobile ? 1.8 : 1.0;
+  const toneExposure = mobile ? 0.9 : CONFIG.TONE_MAPPING_EXPOSURE;
+  const envIntensity = mobile ? 0.08 : CONFIG.ENVIRONMENT_INTENSITY;
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -1192,7 +1224,7 @@ export default function TetsuoAvatar3D({
         gl={{
           antialias: qc.antialias,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: CONFIG.TONE_MAPPING_EXPOSURE,
+          toneMappingExposure: toneExposure,
           outputColorSpace: THREE.SRGBColorSpace,
         }}
       >
@@ -1204,21 +1236,21 @@ export default function TetsuoAvatar3D({
         {/* Key Light - Warm, softened for natural skin rendering */}
         <directionalLight
           position={[80, 180, 120]}
-          intensity={CONFIG.KEY_LIGHT_INTENSITY}
+          intensity={CONFIG.KEY_LIGHT_INTENSITY * lightScale}
           color={CONFIG.KEY_LIGHT_COLOR}
         />
 
         {/* Fill Light - Raised to reduce harsh contrast */}
         <directionalLight
           position={[-80, 120, 80]}
-          intensity={CONFIG.FILL_LIGHT_INTENSITY}
+          intensity={CONFIG.FILL_LIGHT_INTENSITY * lightScale}
           color={CONFIG.FILL_LIGHT_COLOR}
         />
 
         {/* Rim Light - Warm edge definition */}
         <directionalLight
           position={[0, 140, -80]}
-          intensity={CONFIG.RIM_LIGHT_INTENSITY}
+          intensity={CONFIG.RIM_LIGHT_INTENSITY * lightScale}
           color={CONFIG.RIM_LIGHT_COLOR}
         />
 
@@ -1227,16 +1259,17 @@ export default function TetsuoAvatar3D({
           position={[0, 180, 100]}
           angle={0.3}
           penumbra={0.8}
-          intensity={CONFIG.FACE_SPOT_INTENSITY}
+          intensity={CONFIG.FACE_SPOT_INTENSITY * lightScale}
           color={CONFIG.FACE_SPOT_COLOR}
         />
 
         {/* Ambient fill */}
-        <ambientLight intensity={CONFIG.AMBIENT_INTENSITY} />
+        <ambientLight intensity={CONFIG.AMBIENT_INTENSITY * lightScale} />
 
         {/* Apartment environment for softer, warmer ambient light */}
-        {qc.environmentMap && (
-          <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} environmentIntensity={CONFIG.ENVIRONMENT_INTENSITY} />
+        {/* Disabled on mobile: the HDR fetch from CDN fails on Android WebView (CSP/network) */}
+        {qc.environmentMap && !mobile && (
+          <Environment preset={CONFIG.ENVIRONMENT_PRESET} background={false} environmentIntensity={envIntensity} />
         )}
 
         {/* The reactive model */}
@@ -1283,7 +1316,7 @@ export default function TetsuoAvatar3D({
 export function preloadModel() {
   try {
     log.info("[TetsuoAvatar3D] Preloading model: " + MODEL_PATH);
-    useGLTF.preload(MODEL_PATH, true);
+    useGLTF.preload(MODEL_PATH, '/draco/');
   } catch (e) {
     log.warn("[TetsuoAvatar3D] Failed to preload model: " + e);
   }

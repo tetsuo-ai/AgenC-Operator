@@ -9,11 +9,18 @@ import android.os.VibratorManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+
+    // Force light (white) status bar and navigation bar icons for dark app
+    val controller = WindowCompat.getInsetsController(window, window.decorView)
+    controller.isAppearanceLightStatusBars = false
+    controller.isAppearanceLightNavigationBars = false
   }
 
   override fun onWebViewCreate(webView: WebView) {
