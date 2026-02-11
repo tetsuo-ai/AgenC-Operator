@@ -43,6 +43,13 @@ export type IntentAction =
   | 'generate_image'
   // Video Generation (Pro tier)
   | 'generate_video'
+  // Device Operations (AgenCPI)
+  | 'scan_devices'
+  | 'pair_device'
+  | 'unpair_device'
+  | 'list_devices'
+  | 'device_status'
+  | 'configure_device'
   // System
   | 'help'
   | 'unknown';
@@ -593,4 +600,51 @@ export interface DbStats {
 export interface DbPruneResult {
   tasks_pruned: number;
   sessions_pruned: number;
+}
+
+// ============================================================================
+// AgenCPI Device Types
+// ============================================================================
+
+export type DiscoveryMethod = 'mdns' | 'ble' | 'manual';
+
+export interface DiscoveredDevice {
+  device_id: string;
+  name: string;
+  ip_address: string | null;
+  port: number | null;
+  discovery_method: DiscoveryMethod;
+  rssi: number | null;
+  version: string | null;
+  discovered_at: number;
+}
+
+export type DeviceStatus = 'online' | 'offline' | 'pairing' | 'error';
+
+export interface DeviceAgentConfig {
+  agent_name: string;
+  capabilities: string[];
+  model?: string;
+  network: string;
+  rpc_url?: string;
+  system_prompt?: string;
+}
+
+export interface PairedDevice {
+  device_id: string;
+  name: string;
+  ip_address: string;
+  port: number;
+  shared_secret: string;
+  paired_by_wallet: string;
+  paired_at: number;
+  last_seen: number;
+  status: DeviceStatus;
+  agent_config?: DeviceAgentConfig;
+}
+
+export interface DeviceCommandResult {
+  success: boolean;
+  message: string;
+  data?: unknown;
 }

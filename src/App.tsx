@@ -23,6 +23,7 @@ import StatusBar from './components/StatusBar';
 import WalletDropdown from './components/WalletDropdown';
 import HudPanel from './components/HudPanel';
 import TaskMarketplace from './components/TaskMarketplace';
+import DevicePairingPanel from './components/DevicePairingPanel';
 import ToastContainer from './components/ToastContainer';
 import BottomNav from './components/BottomNav';
 import type { Tab } from './components/BottomNav';
@@ -86,6 +87,7 @@ function App() {
   const [taskCount, setTaskCount] = useState(0);
   const mobile = isMobile();
   const [isFeedOpen, setIsFeedOpen] = useState(false);
+  const [isDevicesOpen, setIsDevicesOpen] = useState(false);
 
   // Mobile Wallet Adapter (MWA) — only active on Android
   const mobileWallet = useMobileWallet();
@@ -270,6 +272,12 @@ function App() {
         e.preventDefault();
         toggleMarketplace();
       }
+
+      // D toggles the Device Pairing panel
+      if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        setIsDevicesOpen((prev) => !prev);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -281,6 +289,7 @@ function App() {
     setMobileTab(tab);
     setIsCustomizeOpen(tab === 'settings');
     setIsMarketplaceOpen(tab === 'tasks');
+    setIsDevicesOpen(tab === 'devices');
     setIsHudOpen(false);
   }, [setIsCustomizeOpen, setIsMarketplaceOpen, setIsHudOpen]);
 
@@ -500,6 +509,20 @@ function App() {
               });
             }}
           />
+        </div>
+      )}
+
+      {/* Device Pairing Overlay (toggle with D on desktop, Devices tab on mobile) */}
+      {isDevicesOpen && (
+        <div
+          className={`absolute z-40 overflow-y-auto ${
+            mobile
+              ? 'inset-0 bottom-14 p-2 bg-black/95'
+              : 'top-12 left-1/2 transform -translate-x-1/2 max-h-[80vh]'
+          }`}
+          style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 72px)' } : undefined}
+        >
+          <DevicePairingPanel walletAddress={wallet?.address || ''} />
         </div>
       )}
 

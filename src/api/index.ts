@@ -26,6 +26,10 @@ import type {
   SessionState,
   DbStats,
   DbPruneResult,
+  DiscoveredDevice,
+  PairedDevice,
+  DeviceAgentConfig,
+  DeviceCommandResult,
 } from '../types';
 
 // ============================================================================
@@ -1211,6 +1215,92 @@ export const DatabaseAPI = {
   },
 };
 
+// ============================================================================
+// AgenCPI Device API
+// ============================================================================
+
+export const DeviceAPI = {
+  /** Scan for AgenCPI devices via mDNS */
+  scan(durationSecs?: number): Promise<DiscoveredDevice[]> {
+    return invoke<AsyncResult<DiscoveredDevice[]>>('scan_devices', { durationSecs })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] scan_devices failed:', err);
+        throw new TetsuoAPIError(`Device scan failed: ${err}`);
+      });
+  },
+
+  /** Pair with a discovered device */
+  pair(device: DiscoveredDevice, walletPubkey: string): Promise<PairedDevice> {
+    return invoke<AsyncResult<PairedDevice>>('pair_device', {
+      deviceJson: JSON.stringify(device),
+      walletPubkey,
+    })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] pair_device failed:', err);
+        throw new TetsuoAPIError(`Pairing failed: ${err}`);
+      });
+  },
+
+  /** Unpair a device */
+  unpair(deviceId: string): Promise<boolean> {
+    return invoke<AsyncResult<boolean>>('unpair_device', { deviceId })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] unpair_device failed:', err);
+        throw new TetsuoAPIError(`Unpair failed: ${err}`);
+      });
+  },
+
+  /** List all paired devices */
+  listPaired(): Promise<PairedDevice[]> {
+    return invoke<AsyncResult<PairedDevice[]>>('list_paired_devices')
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] list_paired_devices failed:', err);
+        throw new TetsuoAPIError(`List devices failed: ${err}`);
+      });
+  },
+
+  /** Check device health */
+  getStatus(deviceId: string): Promise<DeviceCommandResult> {
+    return invoke<AsyncResult<DeviceCommandResult>>('get_device_status', { deviceId })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] get_device_status failed:', err);
+        throw new TetsuoAPIError(`Device status failed: ${err}`);
+      });
+  },
+
+  /** Push agent configuration to device */
+  configure(deviceId: string, config: DeviceAgentConfig): Promise<DeviceCommandResult> {
+    return invoke<AsyncResult<DeviceCommandResult>>('configure_device_agent', {
+      deviceId,
+      configJson: JSON.stringify(config),
+    })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] configure_device_agent failed:', err);
+        throw new TetsuoAPIError(`Configure failed: ${err}`);
+      });
+  },
+
+  /** Send command to device */
+  sendCommand(deviceId: string, command: string, payload?: unknown): Promise<DeviceCommandResult> {
+    return invoke<AsyncResult<DeviceCommandResult>>('send_device_command', {
+      deviceId,
+      command,
+      payload: payload ? JSON.stringify(payload) : undefined,
+    })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] send_device_command failed:', err);
+        throw new TetsuoAPIError(`Command failed: ${err}`);
+      });
+  },
+};
+
 export const TetsuoAPI = {
   wallet: WalletAPI,
   mobileWallet: MobileWalletAPI,
@@ -1238,6 +1328,8 @@ export const TetsuoAPI = {
   github: GitHubAPI,
   // Phase 5: Database
   database: DatabaseAPI,
+  // AgenCPI Devices
+  device: DeviceAPI,
 };
 
 export default TetsuoAPI;
