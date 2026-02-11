@@ -12,6 +12,7 @@
 //! - GitHubExecutor: GitHub issues, comments, workflows, gists
 //! ============================================================================
 
+mod device;
 mod discord;
 mod email;
 mod github;
@@ -22,6 +23,7 @@ mod slack;
 mod twitter;
 mod video;
 
+pub use device::DeviceExecutor;
 pub use discord::DiscordExecutor;
 pub use email::EmailExecutor;
 pub use github::{GitHubExecutor, GistResult, IssueResult, CommentResult, WorkflowResult};

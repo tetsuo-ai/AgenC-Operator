@@ -213,6 +213,19 @@ impl SolanaExecutor {
                 signature: None,
                 data: None,
             }),
+
+            // Device operations handled by DeviceExecutor
+            IntentAction::ScanDevices |
+            IntentAction::PairDevice |
+            IntentAction::UnpairDevice |
+            IntentAction::ListDevices |
+            IntentAction::DeviceStatus |
+            IntentAction::ConfigureDevice => Ok(ExecutionResult {
+                success: false,
+                message: "Device operations are handled by DeviceExecutor".into(),
+                signature: None,
+                data: None,
+            }),
         }
     }
 

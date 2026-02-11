@@ -53,7 +53,7 @@ pub use memory::{
 
 // Executors
 pub use executor::{
-    DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
+    DeviceExecutor, DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
     JupiterSwapExecutor, SlackExecutor, TwitterExecutor, VideoExecutor,
     // GitHub result types
     CommentResult, GistResult, IssueResult, WorkflowResult,
