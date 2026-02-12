@@ -1216,11 +1216,11 @@ export const DatabaseAPI = {
 };
 
 // ============================================================================
-// AgenCPI Device API
+// AgenC One Device API
 // ============================================================================
 
 export const DeviceAPI = {
-  /** Scan for AgenCPI devices via mDNS */
+  /** Scan for AgenC One devices via mDNS */
   scan(durationSecs?: number): Promise<DiscoveredDevice[]> {
     return invoke<AsyncResult<DiscoveredDevice[]>>('scan_devices', { durationSecs })
       .then(unwrapResult)
@@ -1328,7 +1328,7 @@ export const TetsuoAPI = {
   github: GitHubAPI,
   // Phase 5: Database
   database: DatabaseAPI,
-  // AgenCPI Devices
+  // AgenC One Devices
   device: DeviceAPI,
 };
 

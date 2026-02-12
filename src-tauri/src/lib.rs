@@ -66,7 +66,7 @@ pub struct AppState {
     pub github_executor: Arc<RwLock<Option<GitHubExecutor>>>,
     // Phase 6: Video executor
     pub video_executor: Arc<RwLock<Option<VideoExecutor>>>,
-    // AgenCPI: Device executor (no API key needed)
+    // AgenC One: Device executor (no API key needed)
     pub device_executor: Arc<RwLock<DeviceExecutor>>,
     // Phase 5: Embedded database
     pub db: Arc<RwLock<Option<OperatorDb>>>,
@@ -3143,10 +3143,10 @@ async fn init_memory_system(state: State<'_, AppState>) -> Result<AsyncResult<bo
 }
 
 // ============================================================================
-// AgenCPI Device Commands
+// AgenC One Device Commands
 // ============================================================================
 
-/// Scan for AgenCPI devices via mDNS
+/// Scan for AgenC One devices via mDNS
 #[tauri::command]
 async fn scan_devices(
     state: State<'_, AppState>,
@@ -3165,7 +3165,7 @@ async fn scan_devices(
     }
 }
 
-/// Pair with a discovered AgenCPI device
+/// Pair with a discovered AgenC One device
 #[tauri::command]
 async fn pair_device(
     state: State<'_, AppState>,
@@ -3824,9 +3824,9 @@ pub fn run() {
         VideoExecutor::new(api_key.clone())
     });
 
-    // AgenCPI: Initialize Device executor (always available, no API key needed)
+    // AgenC One: Initialize Device executor (always available, no API key needed)
     let device_executor = DeviceExecutor::new();
-    info!("Device executor initialized for AgenCPI discovery");
+    info!("Device executor initialized for AgenC One discovery");
 
     // Phase 4: Initialize GitHub executor
     let github_executor = config.github_token.as_ref().map(|token| {
@@ -3895,7 +3895,7 @@ pub fn run() {
         github_executor: Arc::new(RwLock::new(github_executor)),
         // Phase 6: Video executor
         video_executor: Arc::new(RwLock::new(video_executor)),
-        // AgenCPI: Device executor
+        // AgenC One: Device executor
         device_executor: Arc::new(RwLock::new(device_executor)),
         // Phase 5: Embedded database
         db: Arc::new(RwLock::new(operator_db)),
@@ -3975,7 +3975,7 @@ pub fn run() {
             create_github_issue,
             add_github_comment,
             trigger_github_workflow,
-            // AgenCPI device operations
+            // AgenC One device operations
             scan_devices,
             pair_device,
             unpair_device,

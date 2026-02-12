@@ -72,7 +72,7 @@ pub enum IntentAction {
     AddGitHubComment,
     TriggerGitHubWorkflow,
 
-    // Device Operations (AgenCPI)
+    // Device Operations (AgenC One)
     ScanDevices,
     PairDevice,
     UnpairDevice,
@@ -547,7 +547,7 @@ pub struct TriggerGitHubWorkflowParams {
 }
 
 // ============================================================================
-// AgenCPI Device Types
+// AgenC One Device Types
 // ============================================================================
 
 /// How a device was discovered

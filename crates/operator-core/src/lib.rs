@@ -54,11 +54,9 @@ pub use memory::{
 // Executors
 pub use executor::{
     DeviceExecutor, DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
-    JupiterSwapExecutor, SlackExecutor, TwitterExecutor, VideoExecutor,
+    JupiterSwapExecutor, TwitterExecutor, VideoExecutor,
     // GitHub result types
     CommentResult, GistResult, IssueResult, WorkflowResult,
-    // Slack types
-    Block, ContextElement, MrkdwnText, PlainText, SlackResult,
 };
 
 // Transaction retry

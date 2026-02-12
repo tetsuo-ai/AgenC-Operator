@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { TetsuoAPI } from './api';
 import { hapticLight, hapticMedium } from './utils/haptics';
 
@@ -26,6 +26,7 @@ import TaskMarketplace from './components/TaskMarketplace';
 import DevicePairingPanel from './components/DevicePairingPanel';
 import ToastContainer from './components/ToastContainer';
 import BottomNav from './components/BottomNav';
+import OnboardingOverlay, { hasSeenOnboarding } from './components/OnboardingOverlay';
 import type { Tab } from './components/BottomNav';
 
 // Hooks
@@ -88,6 +89,7 @@ function App() {
   const mobile = isMobile();
   const [isFeedOpen, setIsFeedOpen] = useState(false);
   const [isDevicesOpen, setIsDevicesOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => !hasSeenOnboarding());
 
   // Mobile Wallet Adapter (MWA) — only active on Android
   const mobileWallet = useMobileWallet();
@@ -601,6 +603,13 @@ function App() {
 
       {/* Mobile Bottom Navigation */}
       <BottomNav activeTab={mobileTab} onTabChange={handleMobileTabChange} taskCount={taskCount} />
+
+      {/* First-time onboarding */}
+      <AnimatePresence>
+        {showOnboarding && (
+          <OnboardingOverlay onComplete={() => setShowOnboarding(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

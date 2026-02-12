@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Device Store - Zustand State for AgenCPI Device Management
+ * Device Store - Zustand State for AgenC One Device Management
  * ============================================================================
  */
 

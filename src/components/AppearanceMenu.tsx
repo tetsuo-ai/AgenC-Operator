@@ -17,7 +17,9 @@
 
 import { useEffect, useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAppStore, useAppearance, usePresets } from '../hooks/useAppStore';
+import { useAppStore, useAppearance, usePresets, useAudioEnabled } from '../hooks/useAppStore';
+import { TetsuoAPI } from '../api';
+import { useNotificationStore } from '../stores/notificationStore';
 import { useAvatarStore } from '../stores/avatarStore';
 import { isMobile } from '../hooks/usePlatform';
 import { hapticLight } from '../utils/haptics';
@@ -180,6 +182,14 @@ export default function AppearanceMenu({ isOpen, onClose, onToggle }: Appearance
   const [presetName, setPresetName] = useState('');
   const [showPresetInput, setShowPresetInput] = useState(false);
 
+  // Network & Audio settings
+  const audioEnabled = useAudioEnabled();
+  const { setAudioEnabled } = useAppStore();
+  const { addToast } = useNotificationStore();
+  const [network, setNetwork] = useState<'devnet' | 'mainnet-beta'>('devnet');
+  const [customRpc, setCustomRpc] = useState('');
+  const [networkLoading, setNetworkLoading] = useState(false);
+
   const currentCameraMode = useAvatarStore((s) => s.currentMode);
   const setCameraMode = useAvatarStore((s) => s.setCameraMode);
   const renderQuality = useAvatarStore((s) => s.renderQuality);
@@ -210,6 +220,32 @@ export default function AppearanceMenu({ isOpen, onClose, onToggle }: Appearance
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  // Load current network config on mount
+  useEffect(() => {
+    TetsuoAPI.config.getConfig().then((config) => {
+      const net = config.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
+      setNetwork(net);
+      setCustomRpc(config.rpc_url || '');
+    }).catch(() => {});
+  }, []);
+
+  const handleNetworkChange = useCallback(async (net: 'devnet' | 'mainnet-beta', rpc?: string) => {
+    setNetworkLoading(true);
+    const rpcUrl = rpc || (net === 'mainnet-beta'
+      ? 'https://api.mainnet-beta.solana.com'
+      : 'https://api.devnet.solana.com');
+    try {
+      await TetsuoAPI.config.setRpcUrl(rpcUrl);
+      setNetwork(net);
+      setCustomRpc(rpcUrl);
+      addToast({ type: 'success', title: 'Network updated', message: `Switched to ${net}` });
+    } catch (err) {
+      addToast({ type: 'error', title: 'Network error', message: String(err) });
+    } finally {
+      setNetworkLoading(false);
+    }
+  }, [addToast]);
 
   // ============================================================================
   // Handlers
@@ -543,6 +579,62 @@ export default function AppearanceMenu({ isOpen, onClose, onToggle }: Appearance
                     + Save Current as Preset
                   </button>
                 )}
+              </div>
+
+              {/* Network */}
+              <div className="space-y-3">
+                <h4 className="text-holo-silver text-xs uppercase tracking-wider border-b border-cyber-light pb-1">
+                  Network
+                </h4>
+                <div className="flex gap-2">
+                  {(['devnet', 'mainnet-beta'] as const).map((net) => (
+                    <button
+                      key={net}
+                      onClick={() => { hapticLight(); handleNetworkChange(net); }}
+                      disabled={networkLoading}
+                      className={`flex-1 py-1.5 text-xs uppercase tracking-wider rounded border transition-colors ${
+                        network === net
+                          ? 'bg-neon-cyan/20 border-neon-cyan text-neon-cyan'
+                          : 'border-cyber-light text-holo-silver hover:border-neon-cyan/50'
+                      } ${networkLoading ? 'opacity-50' : ''}`}
+                    >
+                      {net === 'mainnet-beta' ? 'Mainnet' : 'Devnet'}
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <label className="text-holo-silver/60 text-[10px] uppercase tracking-wider block mb-1">
+                    Custom RPC URL
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={customRpc}
+                      onChange={(e) => setCustomRpc(e.target.value)}
+                      placeholder="https://..."
+                      className="flex-1 px-2 py-1.5 bg-cyber-dark border border-cyber-light rounded text-xs text-holo-silver font-mono placeholder:text-holo-silver/20 focus:border-neon-cyan focus:outline-none"
+                    />
+                    <button
+                      onClick={() => { hapticLight(); handleNetworkChange(network, customRpc); }}
+                      disabled={networkLoading || !customRpc}
+                      className="px-3 py-1.5 text-xs bg-neon-cyan/20 border border-neon-cyan/40 text-neon-cyan rounded hover:bg-neon-cyan/30 disabled:opacity-40"
+                    >
+                      Set
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Audio */}
+              <div className="space-y-3">
+                <h4 className="text-holo-silver text-xs uppercase tracking-wider border-b border-cyber-light pb-1">
+                  Audio
+                </h4>
+                <ToggleSwitch
+                  label="Voice Output"
+                  checked={audioEnabled}
+                  onChange={(enabled) => { hapticLight(); setAudioEnabled(enabled); }}
+                />
               </div>
 
               {/* Reset Button */}

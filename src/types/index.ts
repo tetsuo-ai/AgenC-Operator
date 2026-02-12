@@ -43,7 +43,7 @@ export type IntentAction =
   | 'generate_image'
   // Video Generation (Pro tier)
   | 'generate_video'
-  // Device Operations (AgenCPI)
+  // Device Operations (AgenC One)
   | 'scan_devices'
   | 'pair_device'
   | 'unpair_device'
@@ -603,7 +603,7 @@ export interface DbPruneResult {
 }
 
 // ============================================================================
-// AgenCPI Device Types
+// AgenC One Device Types
 // ============================================================================
 
 export type DiscoveryMethod = 'mdns' | 'ble' | 'manual';

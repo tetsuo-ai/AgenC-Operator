@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * DevicePairingPanel - AgenCPI Device Discovery & Pairing UI
+ * DevicePairingPanel - AgenC One Device Discovery & Pairing UI
  * ============================================================================
  * Three sections: Scanner, Paired Devices, Config Editor.
  * Cyberpunk glassmorphism matching TaskMarketplace style.
@@ -32,7 +32,7 @@ function ScannerSection({ walletAddress }: { walletAddress: string }) {
       const devices = await TetsuoAPI.device.scan(5);
       setDiscoveredDevices(devices);
       if (devices.length === 0) {
-        addToast({ type: 'info', title: 'No devices found', message: 'Make sure AgenCPI nodes are powered on' });
+        addToast({ type: 'info', title: 'No devices found', message: 'Make sure AgenC One nodes are powered on' });
       }
     } catch (err) {
       addToast({ type: 'error', title: 'Scan failed', message: String(err) });
@@ -100,7 +100,7 @@ function ScannerSection({ walletAddress }: { walletAddress: string }) {
               </div>
             </div>
             <p className="text-[10px] font-display uppercase tracking-widest text-white/40 mt-3">
-              Scanning for AgenCPI nodes...
+              Scanning for AgenC One nodes...
             </p>
           </motion.div>
         )}
@@ -432,7 +432,7 @@ export default function DevicePairingPanel({ walletAddress }: DevicePairingPanel
       {/* Header */}
       <div className="text-center mb-2">
         <h2 className="font-display text-sm uppercase tracking-[0.3em] text-white/80">
-          AgenCPI Devices
+          AgenC One Devices
         </h2>
         <p className="text-[10px] text-white/30 mt-1">
           Discover and pair hardware nodes

@@ -1,7 +1,7 @@
 //! ============================================================================
-//! Device Executor - AgenCPI Device Discovery & Pairing
+//! Device Executor - AgenC One Device Discovery & Pairing
 //! ============================================================================
-//! Handles discovering and pairing with AgenCPI hardware nodes:
+//! Handles discovering and pairing with AgenC One hardware nodes:
 //! - mDNS discovery (primary, pure Rust via mdns-sd)
 //! - Challenge-response pairing over HTTP
 //! - Device health checking and config push
@@ -18,10 +18,10 @@ use crate::types::{
     PairResult, PairedDevice,
 };
 
-/// mDNS service type for AgenCPI nodes
-const AGENCPI_SERVICE_TYPE: &str = "_agencpi._tcp.local.";
+/// mDNS service type for AgenC One nodes
+const AGENC_ONE_SERVICE_TYPE: &str = "_agencone._tcp.local.";
 
-/// Default API port on AgenCPI devices
+/// Default API port on AgenC One devices
 const DEFAULT_DEVICE_PORT: u16 = 8420;
 
 /// Device discovery and management executor
@@ -47,7 +47,7 @@ impl DeviceExecutor {
     // mDNS Discovery
     // ========================================================================
 
-    /// Scan for AgenCPI devices via mDNS. Collects results for `duration_secs`.
+    /// Scan for AgenC One devices via mDNS. Collects results for `duration_secs`.
     pub async fn scan_mdns(&self, duration_secs: u64) -> Result<Vec<DiscoveredDevice>> {
         if *self.scanning.read().await {
             return Err(anyhow!("Scan already in progress"));
@@ -65,7 +65,7 @@ impl DeviceExecutor {
                 .map_err(|e| anyhow!("Failed to create mDNS daemon: {}", e))?;
 
             let receiver = mdns
-                .browse(AGENCPI_SERVICE_TYPE)
+                .browse(AGENC_ONE_SERVICE_TYPE)
                 .map_err(|e| anyhow!("Failed to browse mDNS: {}", e))?;
 
             let mut devices = Vec::new();

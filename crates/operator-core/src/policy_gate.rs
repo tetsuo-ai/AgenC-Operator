@@ -254,7 +254,7 @@ impl PolicyGate {
                 }
             }
 
-            // Device Operations (AgenCPI) - scan/list are read-only, pair/config need verbal
+            // Device Operations (AgenC One) - scan/list are read-only, pair/config need verbal
             IntentAction::ScanDevices |
             IntentAction::ListDevices |
             IntentAction::DeviceStatus => {

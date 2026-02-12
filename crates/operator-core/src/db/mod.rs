@@ -439,7 +439,7 @@ impl OperatorDb {
     }
 
     // ========================================================================
-    // Device Operations (AgenCPI)
+    // Device Operations (AgenC One)
     // ========================================================================
 
     pub fn store_device(&self, device: &crate::types::PairedDevice) -> Result<()> {

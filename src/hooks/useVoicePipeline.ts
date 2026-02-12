@@ -14,6 +14,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { TetsuoAPI } from '../api';
+import { useAppStore } from './useAppStore';
 import { getGlobalMouthDriver, getGlobalAudioContext } from '../utils/mouthDriver';
 import { log } from '../utils/log';
 import type {
@@ -636,6 +637,16 @@ export function useVoicePipeline({
 
   const playAudioQueueNonBlocking = useCallback(() => {
     if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
+
+    // If audio is muted, drain the queue without playing
+    if (!useAppStore.getState().audioEnabled) {
+      audioQueueRef.current.length = 0;
+      if (responseDoneRef.current) {
+        onVoiceStateChange('idle');
+      }
+      return;
+    }
+
     isPlayingRef.current = true;
 
     // Use global audio context and mouth driver for amplitude analysis
