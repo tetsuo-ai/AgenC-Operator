@@ -72,6 +72,14 @@ pub enum IntentAction {
     AddGitHubComment,
     TriggerGitHubWorkflow,
 
+    // Device Operations (AgenC One)
+    ScanDevices,
+    PairDevice,
+    UnpairDevice,
+    ListDevices,
+    DeviceStatus,
+    ConfigureDevice,
+
     // System
     Help,
     Unknown,
@@ -536,4 +544,87 @@ pub struct TriggerGitHubWorkflowParams {
     pub ref_name: String,
     #[serde(default)]
     pub inputs: Option<serde_json::Value>,
+}
+
+// ============================================================================
+// AgenC One Device Types
+// ============================================================================
+
+/// How a device was discovered
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscoveryMethod {
+    Mdns,
+    Ble,
+    Manual,
+}
+
+/// A device found during scanning (not yet paired)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredDevice {
+    pub device_id: String,
+    pub name: String,
+    pub ip_address: Option<String>,
+    pub port: Option<u16>,
+    pub discovery_method: DiscoveryMethod,
+    pub rssi: Option<i32>,
+    pub version: Option<String>,
+    pub discovered_at: i64,
+}
+
+/// Runtime status of a paired device
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceStatus {
+    Online,
+    Offline,
+    Pairing,
+    Error,
+}
+
+/// Agent configuration pushed to a device
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceAgentConfig {
+    pub agent_name: String,
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    pub network: String,
+    #[serde(default)]
+    pub rpc_url: Option<String>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+}
+
+/// A device that has been paired and persisted
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairedDevice {
+    pub device_id: String,
+    pub name: String,
+    pub ip_address: String,
+    pub port: u16,
+    pub shared_secret: String,
+    pub paired_by_wallet: String,
+    pub paired_at: i64,
+    pub last_seen: i64,
+    pub status: DeviceStatus,
+    #[serde(default)]
+    pub agent_config: Option<DeviceAgentConfig>,
+}
+
+/// Result of a pairing attempt
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairResult {
+    pub success: bool,
+    pub device: Option<PairedDevice>,
+    pub error: Option<String>,
+}
+
+/// Result of a device command (health check, config push, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceCommandResult {
+    pub success: bool,
+    pub message: String,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
 }

@@ -253,6 +253,29 @@ impl PolicyGate {
                     reason: "GitHub operation requires verbal confirmation".into(),
                 }
             }
+
+            // Device Operations (AgenC One) - scan/list are read-only, pair/config need verbal
+            IntentAction::ScanDevices |
+            IntentAction::ListDevices |
+            IntentAction::DeviceStatus => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: false,
+                    confirmation_type: ConfirmationType::None,
+                    reason: "Read-only device operation".into(),
+                }
+            }
+
+            IntentAction::PairDevice |
+            IntentAction::UnpairDevice |
+            IntentAction::ConfigureDevice => {
+                PolicyCheck {
+                    allowed: true,
+                    requires_confirmation: true,
+                    confirmation_type: ConfirmationType::Verbal,
+                    reason: "Device pairing/config requires verbal confirmation".into(),
+                }
+            }
         }
     }
 

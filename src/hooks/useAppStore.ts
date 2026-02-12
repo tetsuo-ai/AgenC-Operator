@@ -27,6 +27,7 @@ import { DEFAULT_APPEARANCE } from '../types';
 const STORAGE_KEYS = {
   APPEARANCE: 'tetsuo-appearance',
   PRESETS: 'tetsuo-appearance-presets',
+  AUDIO_ENABLED: 'tetsuo-audio-enabled',
 } as const;
 
 // ============================================================================
@@ -136,6 +137,10 @@ interface AppState {
   isMarketplaceOpen: boolean;
   setIsMarketplaceOpen: (open: boolean) => void;
   toggleMarketplace: () => void;
+
+  // Audio Output
+  audioEnabled: boolean;
+  setAudioEnabled: (enabled: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -238,6 +243,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   isMarketplaceOpen: false,
   setIsMarketplaceOpen: (isMarketplaceOpen) => set({ isMarketplaceOpen }),
   toggleMarketplace: () => set((state) => ({ isMarketplaceOpen: !state.isMarketplaceOpen })),
+
+  // Audio Output (persisted to localStorage)
+  audioEnabled: localStorage.getItem(STORAGE_KEYS.AUDIO_ENABLED) !== 'false',
+  setAudioEnabled: (audioEnabled) => {
+    localStorage.setItem(STORAGE_KEYS.AUDIO_ENABLED, String(audioEnabled));
+    set({ audioEnabled });
+  },
 }));
 
 // ============================================================================
@@ -254,3 +266,4 @@ export const usePresets = () => useAppStore((state) => state.presets);
 export const useIsCustomizeOpen = () => useAppStore((state) => state.isCustomizeOpen);
 export const useIsHudOpen = () => useAppStore((state) => state.isHudOpen);
 export const useIsMarketplaceOpen = () => useAppStore((state) => state.isMarketplaceOpen);
+export const useAudioEnabled = () => useAppStore((state) => state.audioEnabled);

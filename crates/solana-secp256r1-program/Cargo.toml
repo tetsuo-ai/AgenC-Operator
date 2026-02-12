@@ -1,0 +1,12 @@
+[package]
+name = "solana-secp256r1-program"
+version = "2.2.4"
+edition = "2021"
+description = "Local stub: removes OpenSSL dependency for Android cross-compilation"
+
+[dependencies]
+bytemuck = { version = "1.14", features = ["derive"] }
+solana-sdk-ids = "2.2"
+solana-feature-set = "2.2"
+solana-instruction = "2.3"
+solana-precompile-error = "2.2"

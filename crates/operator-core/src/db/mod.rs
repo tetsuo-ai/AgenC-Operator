@@ -22,6 +22,7 @@ const TASKS: TableDefinition<&str, &[u8]> = TableDefinition::new("tasks");
 const SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("sessions");
 const PROOFS: TableDefinition<&str, &[u8]> = TableDefinition::new("proofs");
 const CONFIG: TableDefinition<&str, &[u8]> = TableDefinition::new("config");
+const DEVICES: TableDefinition<&str, &[u8]> = TableDefinition::new("devices");
 
 /// Embedded database for the AgenC operator
 pub struct OperatorDb {
@@ -59,6 +60,7 @@ impl OperatorDb {
             let _ = write_txn.open_table(SESSIONS).map_err(|e| anyhow!("Failed to create sessions table: {}", e))?;
             let _ = write_txn.open_table(PROOFS).map_err(|e| anyhow!("Failed to create proofs table: {}", e))?;
             let _ = write_txn.open_table(CONFIG).map_err(|e| anyhow!("Failed to create config table: {}", e))?;
+            let _ = write_txn.open_table(DEVICES).map_err(|e| anyhow!("Failed to create devices table: {}", e))?;
         }
         write_txn.commit().map_err(|e| anyhow!("Failed to commit init: {}", e))?;
 
@@ -434,5 +436,108 @@ impl OperatorDb {
             total_sessions: sessions.len(),
             total_proofs: proof_count,
         })
+    }
+
+    // ========================================================================
+    // Device Operations (AgenC One)
+    // ========================================================================
+
+    pub fn store_device(&self, device: &crate::types::PairedDevice) -> Result<()> {
+        let key = format!("devices:{}", device.device_id);
+        let value = bincode::serialize(device)
+            .map_err(|e| anyhow!("Failed to serialize device: {}", e))?;
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        {
+            let mut table = write_txn.open_table(DEVICES)
+                .map_err(|e| anyhow!("Failed to open devices table: {}", e))?;
+            table.insert(key.as_str(), value.as_slice())
+                .map_err(|e| anyhow!("Failed to insert device: {}", e))?;
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored paired device: {}", device.device_id);
+        Ok(())
+    }
+
+    pub fn get_device(&self, device_id: &str) -> Result<Option<crate::types::PairedDevice>> {
+        let key = format!("devices:{}", device_id);
+
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(DEVICES)
+            .map_err(|e| anyhow!("Failed to open devices table: {}", e))?;
+
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get device: {}", e))? {
+            Some(value) => {
+                let device: crate::types::PairedDevice = bincode::deserialize(value.value())
+                    .map_err(|e| anyhow!("Failed to deserialize device: {}", e))?;
+                Ok(Some(device))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_devices(&self) -> Result<Vec<crate::types::PairedDevice>> {
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(DEVICES)
+            .map_err(|e| anyhow!("Failed to open devices table: {}", e))?;
+
+        let mut results = Vec::new();
+        let iter = table.range::<&str>(..)
+            .map_err(|e| anyhow!("Failed to iterate devices: {}", e))?;
+        for entry in iter {
+            let (_key, value) = entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
+            let device: crate::types::PairedDevice = bincode::deserialize(value.value())
+                .map_err(|e| anyhow!("Failed to deserialize device: {}", e))?;
+            results.push(device);
+        }
+        Ok(results)
+    }
+
+    pub fn delete_device(&self, device_id: &str) -> Result<bool> {
+        let key = format!("devices:{}", device_id);
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        let removed;
+        {
+            let mut table = write_txn.open_table(DEVICES)
+                .map_err(|e| anyhow!("Failed to open devices table: {}", e))?;
+            removed = table.remove(key.as_str())
+                .map_err(|e| anyhow!("Failed to remove device: {}", e))?
+                .is_some();
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit delete: {}", e))?;
+
+        if removed {
+            debug!("Deleted device: {}", device_id);
+        }
+        Ok(removed)
+    }
+
+    pub fn update_device_status(&self, device_id: &str, status: crate::types::DeviceStatus) -> Result<()> {
+        let mut device = self
+            .get_device(device_id)?
+            .ok_or_else(|| anyhow!("Device not found: {}", device_id))?;
+
+        device.status = status;
+        device.last_seen = chrono::Utc::now().timestamp();
+        self.store_device(&device)?;
+        debug!("Updated device {} status", device_id);
+        Ok(())
+    }
+
+    pub fn update_device_config(&self, device_id: &str, config: crate::types::DeviceAgentConfig) -> Result<()> {
+        let mut device = self
+            .get_device(device_id)?
+            .ok_or_else(|| anyhow!("Device not found: {}", device_id))?;
+
+        device.agent_config = Some(config);
+        self.store_device(&device)?;
+        debug!("Updated device {} config", device_id);
+        Ok(())
     }
 }

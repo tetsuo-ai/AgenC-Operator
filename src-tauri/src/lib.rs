@@ -15,7 +15,7 @@ use operator_core::{
     // Memory system
     Memory, MemoryManager, MemoryType, UserContext,
     // Executors
-    DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
+    DeviceExecutor, DiscordExecutor, EmailExecutor, GitHubExecutor, GrokCodeExecutor, ImageExecutor,
     JupiterSwapExecutor, TwitterExecutor, VideoExecutor,
     // Types for executors
     SwapParams, SwapQuote, TokenPrice, TweetResult,
@@ -25,6 +25,8 @@ use operator_core::{
     TweetParams, ThreadParams, DiscordMessageParams, DiscordEmbedParams,
     EmailParams, BulkEmailParams, ImageGenParams, VideoGenParams,
     CreateGistParams, CreateGitHubIssueParams, AddGitHubCommentParams, TriggerGitHubWorkflowParams,
+    // Device types
+    DiscoveredDevice, PairedDevice, DeviceAgentConfig, DeviceCommandResult, DeviceStatus,
     // Auth
     auth::{TwitterOAuth, TwitterTokens},
     // Database
@@ -64,6 +66,8 @@ pub struct AppState {
     pub github_executor: Arc<RwLock<Option<GitHubExecutor>>>,
     // Phase 6: Video executor
     pub video_executor: Arc<RwLock<Option<VideoExecutor>>>,
+    // AgenC One: Device executor (no API key needed)
+    pub device_executor: Arc<RwLock<DeviceExecutor>>,
     // Phase 5: Embedded database
     pub db: Arc<RwLock<Option<OperatorDb>>>,
     // Session tracking
@@ -3139,6 +3143,208 @@ async fn init_memory_system(state: State<'_, AppState>) -> Result<AsyncResult<bo
 }
 
 // ============================================================================
+// AgenC One Device Commands
+// ============================================================================
+
+/// Scan for AgenC One devices via mDNS
+#[tauri::command]
+async fn scan_devices(
+    state: State<'_, AppState>,
+    duration_secs: Option<u64>,
+) -> Result<AsyncResult<Vec<DiscoveredDevice>>, String> {
+    let duration = duration_secs.unwrap_or(5);
+    info!("[IPC] scan_devices: {}s", duration);
+
+    let executor = state.device_executor.read().await;
+    match executor.scan_mdns(duration).await {
+        Ok(devices) => {
+            info!("[IPC] Found {} devices", devices.len());
+            Ok(AsyncResult::ok(devices))
+        }
+        Err(e) => Ok(AsyncResult::err(e.to_string())),
+    }
+}
+
+/// Pair with a discovered AgenC One device
+#[tauri::command]
+async fn pair_device(
+    state: State<'_, AppState>,
+    device_json: String,
+    wallet_pubkey: String,
+) -> Result<AsyncResult<PairedDevice>, String> {
+    info!("[IPC] pair_device: wallet={}", &wallet_pubkey[..wallet_pubkey.len().min(8)]);
+
+    let device: DiscoveredDevice = serde_json::from_str(&device_json)
+        .map_err(|e| format!("Invalid device JSON: {}", e))?;
+
+    let executor = state.device_executor.read().await;
+    match executor.pair_device(&device, &wallet_pubkey).await {
+        Ok(result) => {
+            if result.success {
+                if let Some(ref paired) = result.device {
+                    // Persist to DB
+                    if let Some(db) = state.db.read().await.as_ref() {
+                        if let Err(e) = db.store_device(paired) {
+                            warn!("Failed to persist paired device: {}", e);
+                        }
+                    }
+                    info!("[IPC] Paired with device: {}", paired.device_id);
+                    Ok(AsyncResult::ok(paired.clone()))
+                } else {
+                    Ok(AsyncResult::err("Pairing succeeded but no device returned"))
+                }
+            } else {
+                Ok(AsyncResult::err(result.error.unwrap_or_else(|| "Pairing failed".into())))
+            }
+        }
+        Err(e) => Ok(AsyncResult::err(e.to_string())),
+    }
+}
+
+/// Unpair a device by ID
+#[tauri::command]
+async fn unpair_device(
+    state: State<'_, AppState>,
+    device_id: String,
+) -> Result<AsyncResult<bool>, String> {
+    info!("[IPC] unpair_device: {}", device_id);
+
+    match state.db.read().await.as_ref() {
+        Some(db) => match db.delete_device(&device_id) {
+            Ok(deleted) => {
+                info!("[IPC] Device {} unpaired: {}", device_id, deleted);
+                Ok(AsyncResult::ok(deleted))
+            }
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized")),
+    }
+}
+
+/// List all paired devices
+#[tauri::command]
+async fn list_paired_devices(
+    state: State<'_, AppState>,
+) -> Result<AsyncResult<Vec<PairedDevice>>, String> {
+    debug!("[IPC] list_paired_devices");
+
+    match state.db.read().await.as_ref() {
+        Some(db) => match db.list_devices() {
+            Ok(devices) => Ok(AsyncResult::ok(devices)),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::ok(Vec::new())),
+    }
+}
+
+/// Check health/status of a paired device
+#[tauri::command]
+async fn get_device_status(
+    state: State<'_, AppState>,
+    device_id: String,
+) -> Result<AsyncResult<DeviceCommandResult>, String> {
+    info!("[IPC] get_device_status: {}", device_id);
+
+    let db_guard = state.db.read().await;
+    let device = match db_guard.as_ref() {
+        Some(db) => db.get_device(&device_id).ok().flatten(),
+        None => None,
+    };
+
+    match device {
+        Some(paired) => {
+            let executor = state.device_executor.read().await;
+            match executor.check_health(&paired).await {
+                Ok(result) => {
+                    // Update status in DB
+                    if let Some(db) = db_guard.as_ref() {
+                        let new_status = if result.success {
+                            DeviceStatus::Online
+                        } else {
+                            DeviceStatus::Offline
+                        };
+                        let _ = db.update_device_status(&device_id, new_status);
+                    }
+                    Ok(AsyncResult::ok(result))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err(format!("Device not found: {}", device_id))),
+    }
+}
+
+/// Push agent configuration to a paired device
+#[tauri::command]
+async fn configure_device_agent(
+    state: State<'_, AppState>,
+    device_id: String,
+    config_json: String,
+) -> Result<AsyncResult<DeviceCommandResult>, String> {
+    info!("[IPC] configure_device_agent: {}", device_id);
+
+    let config: DeviceAgentConfig = serde_json::from_str(&config_json)
+        .map_err(|e| format!("Invalid config JSON: {}", e))?;
+
+    let db_guard = state.db.read().await;
+    let device = match db_guard.as_ref() {
+        Some(db) => db.get_device(&device_id).ok().flatten(),
+        None => None,
+    };
+
+    match device {
+        Some(paired) => {
+            let executor = state.device_executor.read().await;
+            match executor.configure_device(&paired, &config).await {
+                Ok(result) => {
+                    if result.success {
+                        // Persist config to DB
+                        if let Some(db) = db_guard.as_ref() {
+                            let _ = db.update_device_config(&device_id, config);
+                        }
+                    }
+                    Ok(AsyncResult::ok(result))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err(format!("Device not found: {}", device_id))),
+    }
+}
+
+/// Send an arbitrary command to a paired device
+#[tauri::command]
+async fn send_device_command(
+    state: State<'_, AppState>,
+    device_id: String,
+    command: String,
+    payload: Option<String>,
+) -> Result<AsyncResult<DeviceCommandResult>, String> {
+    info!("[IPC] send_device_command: {} -> {}", device_id, command);
+
+    let payload_value: Option<serde_json::Value> = payload
+        .as_ref()
+        .and_then(|p| serde_json::from_str(p).ok());
+
+    let db_guard = state.db.read().await;
+    let device = match db_guard.as_ref() {
+        Some(db) => db.get_device(&device_id).ok().flatten(),
+        None => None,
+    };
+
+    match device {
+        Some(paired) => {
+            let executor = state.device_executor.read().await;
+            match executor.send_command(&paired, &command, payload_value).await {
+                Ok(result) => Ok(AsyncResult::ok(result)),
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err(format!("Device not found: {}", device_id))),
+    }
+}
+
+// ============================================================================
 // Tauri Commands - Frontend Logging (for debugging)
 // ============================================================================
 
@@ -3618,6 +3824,10 @@ pub fn run() {
         VideoExecutor::new(api_key.clone())
     });
 
+    // AgenC One: Initialize Device executor (always available, no API key needed)
+    let device_executor = DeviceExecutor::new();
+    info!("Device executor initialized for AgenC One discovery");
+
     // Phase 4: Initialize GitHub executor
     let github_executor = config.github_token.as_ref().map(|token| {
         info!("GitHub executor initialized with PAT");
@@ -3685,6 +3895,8 @@ pub fn run() {
         github_executor: Arc::new(RwLock::new(github_executor)),
         // Phase 6: Video executor
         video_executor: Arc::new(RwLock::new(video_executor)),
+        // AgenC One: Device executor
+        device_executor: Arc::new(RwLock::new(device_executor)),
         // Phase 5: Embedded database
         db: Arc::new(RwLock::new(operator_db)),
         // Session tracking
@@ -3763,6 +3975,14 @@ pub fn run() {
             create_github_issue,
             add_github_comment,
             trigger_github_workflow,
+            // AgenC One device operations
+            scan_devices,
+            pair_device,
+            unpair_device,
+            list_paired_devices,
+            get_device_status,
+            configure_device_agent,
+            send_device_command,
             // Config
             set_rpc_url,
             get_config,

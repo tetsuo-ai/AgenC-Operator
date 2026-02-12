@@ -37,7 +37,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   render(): ReactNode {
     if (this.state.hasError) {
-      return this.props.fallback;
+      return (
+        <>
+          {this.props.fallback}
+          <div className="absolute top-20 left-2 right-2 z-[100] bg-red-900/90 text-white text-[10px] font-mono p-2 rounded max-h-32 overflow-auto">
+            <div className="font-bold text-red-300 mb-1">3D Model Error:</div>
+            <div className="break-all">{this.state.error?.message || 'Unknown error'}</div>
+          </div>
+        </>
+      );
     }
 
     return this.props.children;

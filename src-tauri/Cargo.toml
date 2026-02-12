@@ -13,7 +13,7 @@ tauri-build = { workspace = true, features = [] }
 
 [dependencies]
 # Core operator logic
-operator-core = { path = "../crates/operator-core" }
+operator-core = { path = "../crates/operator-core", default-features = false }
 
 # Solana SDK + RPC client (default-features = false to avoid transitive OpenSSL)
 solana-sdk = { workspace = true, default-features = false }
