@@ -6,11 +6,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "vite --mode desktop",
+    "dev:mobile": "vite --mode mobile",
     "build": "tsc && vite build",
+    "build:desktop": "tsc && vite build --mode desktop",
+    "build:mobile": "tsc && vite build --mode mobile",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "tauri:build:desktop": "tauri build",
+    "tauri:build:mobile": "tauri android build --target aarch64",
     "lint": "eslint src --ext ts,tsx",
     "typecheck": "tsc --noEmit",
     "optimize-model": "gltf-transform optimize public/models/agencfinalformr.glb public/models/agencfinalformr.glb --compress draco --texture-compress false && gltf-transform webp public/models/agencfinalformr.glb public/models/agencfinalformr.glb --quality 90"

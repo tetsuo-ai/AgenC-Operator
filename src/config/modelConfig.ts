@@ -451,8 +451,27 @@ export function categorizeMaterial(
   return 'default';
 }
 
-// Export current model config as default
-export const MODEL_CONFIG = GENESIS9_CONFIG;
-
 // Type import for THREE (will be used by consumers)
 import type * as THREE from 'three';
+
+// ============================================================================
+// Platform-Aware Model Configuration
+// ============================================================================
+// Desktop and mobile can use different model assets and compression settings.
+// For now both use the same Draco-compressed model. To differentiate:
+//   - Place a higher-quality model at /models/agencfinalformr-hq.glb for desktop
+//   - The mobile path stays as the compressed default
+// ============================================================================
+
+import { IS_MOBILE_BUILD } from './platform';
+
+/** Desktop model path (can be swapped for uncompressed variant later) */
+const DESKTOP_MODEL_PATH = '/models/agencfinalformr.glb';
+/** Mobile model path (Draco-compressed for smaller APK) */
+const MOBILE_MODEL_PATH = '/models/agencfinalformr.glb';
+
+export const MODEL_CONFIG: ModelConfig = {
+  ...GENESIS9_CONFIG,
+  path: IS_MOBILE_BUILD ? MOBILE_MODEL_PATH : DESKTOP_MODEL_PATH,
+  draco: IS_MOBILE_BUILD ? true : GENESIS9_CONFIG.draco,
+};

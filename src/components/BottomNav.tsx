@@ -9,7 +9,7 @@
  */
 
 import { motion } from 'framer-motion';
-import { isMobile } from '../hooks/usePlatform';
+import { FEATURES } from '../config/platform';
 import { hapticLight } from '../utils/haptics';
 
 type Tab = 'chat' | 'tasks' | 'devices' | 'settings';
@@ -61,7 +61,7 @@ const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
 ];
 
 export default function BottomNav({ activeTab, onTabChange, taskCount }: BottomNavProps) {
-  if (!isMobile()) return null;
+  if (!FEATURES.bottomNav) return null;
 
   return (
     <nav
