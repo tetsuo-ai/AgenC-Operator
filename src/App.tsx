@@ -32,6 +32,7 @@ import type { Tab } from './components/BottomNav';
 // Hooks
 import { useVoicePipeline } from './hooks/useVoicePipeline';
 import { isMobile } from './hooks/usePlatform';
+import { FEATURES } from './config/platform';
 import { useMobileWallet } from './hooks/useMobileWallet';
 import { useAppStore } from './hooks/useAppStore';
 import { useAvatarStore } from './stores/avatarStore';
@@ -246,9 +247,9 @@ function App() {
   // Keyboard Shortcuts
   // ============================================================================
 
-  // Desktop keyboard shortcuts (C/H/M) — skipped on mobile
+  // Desktop keyboard shortcuts (C/H/M/D) — tree-shaken out on mobile builds
   useEffect(() => {
-    if (mobile) return;
+    if (!FEATURES.keyboardShortcuts) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if user is typing in an input
@@ -284,7 +285,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [mobile, toggleCustomize, toggleHud, toggleMarketplace]);
+  }, [toggleCustomize, toggleHud, toggleMarketplace]);
 
   // Mobile tab handler — sets panels directly (no toggles, avoids double-flip)
   const handleMobileTabChange = useCallback((tab: Tab) => {

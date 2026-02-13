@@ -9,11 +9,11 @@
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { motion } from 'framer-motion';
-import { isMobile } from '../hooks/usePlatform';
+import { FEATURES } from '../config/platform';
 
 export default function TitleBar() {
-  // Android handles its own window chrome — hide the custom title bar
-  if (isMobile()) return null;
+  // Mobile builds don't need frameless window controls — tree-shaken out
+  if (!FEATURES.titleBar) return null;
 
   const appWindow = getCurrentWindow();
 
