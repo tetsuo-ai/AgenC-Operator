@@ -27,6 +27,7 @@ import DevicePairingPanel from './components/DevicePairingPanel';
 import ToastContainer from './components/ToastContainer';
 import BottomNav from './components/BottomNav';
 import OnboardingOverlay, { hasSeenOnboarding } from './components/OnboardingOverlay';
+import AccessGateOverlay from './components/AccessGateOverlay';
 import type { Tab } from './components/BottomNav';
 
 // Hooks
@@ -79,10 +80,12 @@ function App() {
     setIsMarketplaceOpen,
     toggleMarketplace,
     setIsHudOpen,
+    setAccessTier,
   } = useAppStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [accessGranted, setAccessGranted] = useState(false);
 
   // Mobile navigation state
   const [mobileTab, setMobileTab] = useState<Tab>('chat');
@@ -208,7 +211,9 @@ function App() {
       // On mobile: refresh balance via web3.js directly
       mobileWallet.refreshBalance().then(() => {
         setWallet(mobileWallet.toWalletInfo());
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn('[Poll] Mobile balance refresh failed:', err);
+      });
     } else {
       // On desktop: poll via Tauri IPC
       TetsuoAPI.wallet.getWalletInfoNonBlocking(
@@ -605,10 +610,24 @@ function App() {
       {/* Mobile Bottom Navigation */}
       <BottomNav activeTab={mobileTab} onTabChange={handleMobileTabChange} taskCount={taskCount} />
 
-      {/* First-time onboarding */}
+      {/* First-time onboarding (after access gate) */}
       <AnimatePresence>
-        {showOnboarding && (
+        {accessGranted && showOnboarding && (
           <OnboardingOverlay onComplete={() => setShowOnboarding(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Token Gate — blocks entire app until wallet holds 10K+ $TETSUO */}
+      <AnimatePresence>
+        {!accessGranted && (
+          <AccessGateOverlay
+            wallet={wallet}
+            onMobileConnect={handleMobileWalletConnect}
+            onAccessGranted={(tierInfo) => {
+              setAccessTier(tierInfo);
+              setAccessGranted(true);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>

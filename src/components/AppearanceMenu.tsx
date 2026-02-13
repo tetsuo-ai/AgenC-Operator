@@ -227,7 +227,9 @@ export default function AppearanceMenu({ isOpen, onClose, onToggle }: Appearance
       const net = config.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
       setNetwork(net);
       setCustomRpc(config.rpc_url || '');
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn('[Settings] Config load failed:', err);
+    });
   }, []);
 
   const handleNetworkChange = useCallback(async (net: 'devnet' | 'mainnet-beta', rpc?: string) => {

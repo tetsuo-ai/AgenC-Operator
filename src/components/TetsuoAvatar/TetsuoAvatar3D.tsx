@@ -48,6 +48,7 @@ import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
 import { FacsMorphController, logAllMorphs } from "../../utils/dazMorphMap";
 import { isMobile } from "../../hooks/usePlatform";
+// import { IS_MOBILE_BUILD } from "../../config/platform"; // TODO: use for mobile material override
 
 const MODEL_PATH = MODEL_CONFIG.path;
 
@@ -476,15 +477,10 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
       }
     });
 
-    // TEMP DIAGNOSTIC: hide Cube and Sketchfab_model (hair) to test face visibility
+    // Hide non-avatar meshes from the GLB export
     clone.children.forEach((child) => {
-      if (child.name === 'Cube') {
+      if (child.name === 'Cube' || child.name === 'Sketchfab_model') {
         child.visible = false;
-        log.info(`[TetsuoAvatar3D] TEMP: Hidden Cube`);
-      }
-      if (child.name === 'Sketchfab_model') {
-        child.visible = false;
-        log.info(`[TetsuoAvatar3D] TEMP: Hidden Sketchfab_model (hair)`);
       }
     });
 
@@ -494,11 +490,9 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // This prevents the white blob caused by GPU memory exhaustion.
     // Must run BEFORE the general material fix pass below.
     // ═══════════════════════════════════════════════════════════════════════
-    // DISABLED: Mobile material override — testing with original textures
-    // if (isMobile()) {
-    //   log.info('[TetsuoAvatar3D] Mobile detected — applying material override (no textures, forced colors)');
-    //   applyMobileMaterialOverride(clone);
-    // }
+    // TODO: Re-implement mobile material override (strip textures, force category colors)
+    // to prevent GPU memory exhaustion on Android WebView.
+    // if (IS_MOBILE_BUILD) { applyMobileMaterialOverride(clone); }
 
     // Scale model from meters to centimeters.
     // The GLB is authored in meters (1.70m tall) but the camera system
