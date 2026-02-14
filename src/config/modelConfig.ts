@@ -465,13 +465,13 @@ import type * as THREE from 'three';
 
 import { IS_MOBILE_BUILD } from './platform';
 
-/** Desktop model path (can be swapped for uncompressed variant later) */
-const DESKTOP_MODEL_PATH = '/models/agencfinalformr.glb';
-/** Mobile model path (Draco-compressed for smaller APK) */
+/** Desktop model path (uncompressed, full quality — 205 MB) */
+const DESKTOP_MODEL_PATH = '/models/agencfinalformd.glb';
+/** Mobile model path (Draco-compressed for smaller APK — 71 MB) */
 const MOBILE_MODEL_PATH = '/models/agencfinalformr.glb';
 
 export const MODEL_CONFIG: ModelConfig = {
   ...GENESIS9_CONFIG,
   path: IS_MOBILE_BUILD ? MOBILE_MODEL_PATH : DESKTOP_MODEL_PATH,
-  draco: IS_MOBILE_BUILD ? true : GENESIS9_CONFIG.draco,
+  draco: IS_MOBILE_BUILD,
 };

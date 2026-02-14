@@ -27,7 +27,6 @@ import DevicePairingPanel from './components/DevicePairingPanel';
 import ToastContainer from './components/ToastContainer';
 import BottomNav from './components/BottomNav';
 import OnboardingOverlay, { hasSeenOnboarding } from './components/OnboardingOverlay';
-import AccessGateOverlay from './components/AccessGateOverlay';
 import type { Tab } from './components/BottomNav';
 
 // Hooks
@@ -80,12 +79,10 @@ function App() {
     setIsMarketplaceOpen,
     toggleMarketplace,
     setIsHudOpen,
-    setAccessTier,
   } = useAppStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [accessGranted, setAccessGranted] = useState(false);
 
   // Mobile navigation state
   const [mobileTab, setMobileTab] = useState<Tab>('chat');
@@ -309,8 +306,6 @@ function App() {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    console.log('[App] Initializing...');
-
     // Add welcome message immediately
     addMessage({
       id: 'welcome',
@@ -320,10 +315,7 @@ function App() {
     });
 
     // Initialize memory system (non-blocking, fire-and-forget)
-    TetsuoAPI.memory.initialize().then((ok) => {
-      if (ok) console.log('[Init] Memory system initialized');
-      else console.warn('[Init] Memory system unavailable');
-    });
+    TetsuoAPI.memory.initialize();
 
     // Fetch initial data with callbacks (non-blocking)
     TetsuoAPI.wallet.getWalletInfoNonBlocking(
@@ -341,7 +333,7 @@ function App() {
     // Fetch protocol state in parallel (non-blocking)
     TetsuoAPI.protocol.getProtocolStateAsync(
       (state) => setProtocolState(state),
-      () => console.warn('[Init] Could not fetch protocol state')
+      () => { /* protocol state unavailable */ }
     );
 
     // Start polling intervals
@@ -610,24 +602,10 @@ function App() {
       {/* Mobile Bottom Navigation */}
       <BottomNav activeTab={mobileTab} onTabChange={handleMobileTabChange} taskCount={taskCount} />
 
-      {/* First-time onboarding (after access gate) */}
+      {/* First-time onboarding */}
       <AnimatePresence>
-        {accessGranted && showOnboarding && (
+        {showOnboarding && (
           <OnboardingOverlay onComplete={() => setShowOnboarding(false)} />
-        )}
-      </AnimatePresence>
-
-      {/* Token Gate — blocks entire app until wallet holds 10K+ $TETSUO */}
-      <AnimatePresence>
-        {!accessGranted && (
-          <AccessGateOverlay
-            wallet={wallet}
-            onMobileConnect={handleMobileWalletConnect}
-            onAccessGranted={(tierInfo) => {
-              setAccessTier(tierInfo);
-              setAccessGranted(true);
-            }}
-          />
         )}
       </AnimatePresence>
     </div>

@@ -60,6 +60,14 @@ export default function AccessGateOverlay({
       });
   }, [wallet?.is_connected, wallet?.address, onAccessGranted]);
 
+  // Skip gate entirely in debug mode (VITE_DEBUG=true)
+  useEffect(() => {
+    if (import.meta.env.VITE_DEBUG === 'true') {
+      setGateState('granted');
+      onAccessGranted({ tier: 'whale', balance: 0, balance_formatted: '0 (debug)' });
+    }
+  }, [onAccessGranted]);
+
   // Don't render if access is granted
   if (gateState === 'granted') return null;
 
