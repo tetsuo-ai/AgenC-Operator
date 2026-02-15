@@ -45,10 +45,14 @@ Thumbs.db
 src-tauri/target/
 src-tauri/WixTools/
 
-# Whisper models (large binary files — not the 3D avatar in public/models/)
+# Whisper models (large binary files)
 *.bin
 *.ggml
 *.onnx
+
+# Large uncompressed 3D models (desktop GLB exceeds GitHub 100 MB limit)
+# Only the meshopt-compressed mobile model is tracked in git.
+public/models/agencfinalformd.glb
 
 # Test & Coverage
 coverage/

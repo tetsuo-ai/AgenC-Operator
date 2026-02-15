@@ -104,6 +104,8 @@ export interface ModelConfig {
   path: string;
   /** Whether the model uses Draco compression */
   draco: boolean;
+  /** Whether the model uses meshopt compression (preserves morph targets) */
+  meshopt: boolean;
   /** Draco decoder path */
   dracoPath: string;
   /** Skeleton bone patterns */
@@ -135,7 +137,8 @@ export interface ModelConfig {
 
 export const GENESIS9_CONFIG: ModelConfig = {
   path: '/models/agencfinalformr.glb',
-  draco: true,
+  draco: false,
+  meshopt: false,
   dracoPath: '/draco/',
 
   skeleton: {
@@ -457,21 +460,22 @@ import type * as THREE from 'three';
 // ============================================================================
 // Platform-Aware Model Configuration
 // ============================================================================
-// Desktop and mobile can use different model assets and compression settings.
-// For now both use the same Draco-compressed model. To differentiate:
-//   - Place a higher-quality model at /models/agencfinalformr-hq.glb for desktop
-//   - The mobile path stays as the compressed default
+// Desktop uses the full uncompressed model for maximum quality.
+// Mobile uses meshopt-compressed model (preserves all morph targets,
+// unlike Draco which strips them). Compressed via:
+//   npx @gltf-transform/cli optimize <input> <output> --compress meshopt --texture-compress webp
 // ============================================================================
 
 import { IS_MOBILE_BUILD } from './platform';
 
 /** Desktop model path (uncompressed, full quality — 205 MB) */
 const DESKTOP_MODEL_PATH = '/models/agencfinalformd.glb';
-/** Mobile model path (Draco-compressed for smaller APK — 71 MB) */
-const MOBILE_MODEL_PATH = '/models/agencfinalformr.glb';
+/** Mobile model path (meshopt + webp — 9.3 MB, all 977 morph targets preserved) */
+const MOBILE_MODEL_PATH = '/models/agencfinalform-mobile.glb';
 
 export const MODEL_CONFIG: ModelConfig = {
   ...GENESIS9_CONFIG,
   path: IS_MOBILE_BUILD ? MOBILE_MODEL_PATH : DESKTOP_MODEL_PATH,
-  draco: IS_MOBILE_BUILD,
+  draco: false,
+  meshopt: IS_MOBILE_BUILD,
 };

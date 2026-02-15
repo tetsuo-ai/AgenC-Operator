@@ -49,7 +49,8 @@ import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
 import { FacsMorphController } from "../../utils/dazMorphMap";
 import { isMobile } from "../../hooks/usePlatform";
 const MODEL_PATH = MODEL_CONFIG.path;
-const DRACO_PATH = MODEL_CONFIG.draco ? '/draco/' : undefined;
+const USE_DRACO = MODEL_CONFIG.draco ? '/draco/' : false;
+const USE_MESHOPT = MODEL_CONFIG.meshopt;
 
 // ============================================================================
 // Configuration Constants (tweak these to adjust behavior)
@@ -302,7 +303,7 @@ interface ReactiveModelProps {
 }
 
 function ReactiveModel({ appearance, status }: ReactiveModelProps) {
-  const gltf = useGLTF(MODEL_PATH, DRACO_PATH);
+  const gltf = useGLTF(MODEL_PATH, USE_DRACO, USE_MESHOPT);
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
@@ -1105,7 +1106,7 @@ export default function TetsuoAvatar3D({
 export function preloadModel() {
   try {
     log.info("[TetsuoAvatar3D] Preloading model: " + MODEL_PATH);
-    useGLTF.preload(MODEL_PATH, DRACO_PATH);
+    useGLTF.preload(MODEL_PATH, USE_DRACO, USE_MESHOPT);
   } catch (e) {
     log.warn("[TetsuoAvatar3D] Failed to preload model: " + e);
   }
