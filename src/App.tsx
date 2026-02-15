@@ -208,7 +208,9 @@ function App() {
       // On mobile: refresh balance via web3.js directly
       mobileWallet.refreshBalance().then(() => {
         setWallet(mobileWallet.toWalletInfo());
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn('[Poll] Mobile balance refresh failed:', err);
+      });
     } else {
       // On desktop: poll via Tauri IPC
       TetsuoAPI.wallet.getWalletInfoNonBlocking(
@@ -304,8 +306,6 @@ function App() {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    console.log('[App] Initializing...');
-
     // Add welcome message immediately
     addMessage({
       id: 'welcome',
@@ -315,10 +315,7 @@ function App() {
     });
 
     // Initialize memory system (non-blocking, fire-and-forget)
-    TetsuoAPI.memory.initialize().then((ok) => {
-      if (ok) console.log('[Init] Memory system initialized');
-      else console.warn('[Init] Memory system unavailable');
-    });
+    TetsuoAPI.memory.initialize();
 
     // Fetch initial data with callbacks (non-blocking)
     TetsuoAPI.wallet.getWalletInfoNonBlocking(
@@ -336,7 +333,7 @@ function App() {
     // Fetch protocol state in parallel (non-blocking)
     TetsuoAPI.protocol.getProtocolStateAsync(
       (state) => setProtocolState(state),
-      () => console.warn('[Init] Could not fetch protocol state')
+      () => { /* protocol state unavailable */ }
     );
 
     // Start polling intervals

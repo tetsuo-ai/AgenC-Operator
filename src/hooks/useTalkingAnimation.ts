@@ -743,33 +743,6 @@ export function useTalkingAnimation(
     const isEmphasis = state.mouthOpen > config.emphasisThreshold &&
                        state.mouthOpen > state.prevMouthOpen;
 
-    // Diagnostic: log gate conditions every 2s while speaking
-    if (isSpeaking && t - (state as any)._lastGateDiagTime > 2.0) {
-      (state as any)._lastGateDiagTime = t;
-      const timeSinceGesture = t - state.lastGestureEndTime;
-      const pastCooldown = t > state.restCooldownUntil;
-      const intervalOk = timeSinceGesture >= config.gestureMinInterval;
-      const sentenceOk = state.gesturesThisSentence < 2;
-      const chanceVal = (config.gestureChance + (isEmphasis ? config.emphasisGestureBoost : 0)) * delta;
-      log.info(
-        `[GestureDiag] mouthOpen=${state.mouthOpen.toFixed(3)} blend=${blend.toFixed(2)} ` +
-        `active=${!!state.activeGesture} pastCooldown=${pastCooldown} ` +
-        `intervalOk=${intervalOk}(${timeSinceGesture.toFixed(1)}s) ` +
-        `sentenceOk=${sentenceOk}(${state.gesturesThisSentence}/2) ` +
-        `chance/frame=${chanceVal.toFixed(4)} emphasis=${isEmphasis} ` +
-        `inSentence=${state.inSentence} total=${state.gestureCount}`
-      );
-    }
-
-    // ========================================
-    // TEMPORARY: Force-trigger test (every 3s while speaking)
-    // Remove this block after debugging is complete
-    // ========================================
-    if (isSpeaking && !state.activeGesture && (t - state.lastGestureEndTime) > 3.0) {
-      log.info(`[GestureForce] Forcing 'beat' gesture for debug — arms should move now!`);
-      startGesture('beat');
-    }
-
     if (!state.activeGesture && t > state.restCooldownUntil) {
       const timeSinceLastGesture = t - state.lastGestureEndTime;
       const canGesture = timeSinceLastGesture >= config.gestureMinInterval &&
