@@ -13,6 +13,7 @@
  */
 
 import * as THREE from 'three';
+import { log } from './log';
 
 // Actual morph names as they appear in the GLB (without mesh prefix)
 // The mesh prefix (e.g., "G9EyebrowFibers__") is added dynamically during discovery
@@ -179,7 +180,7 @@ function meshPriority(mesh: THREE.Mesh): number {
 export function discoverFacsMorphs(scene: THREE.Object3D): Map<FacsMorphName, { mesh: THREE.Mesh; index: number }> {
     const result = new Map<FacsMorphName, { mesh: THREE.Mesh; index: number }>();
 
-    console.log("[MorphDiscovery] Starting FACS morph discovery...");
+    log.debug("[MorphDiscovery] Starting FACS morph discovery...");
 
     // Phase 1: Collect all meshes with morph targets and sort by priority
     const morphMeshes: THREE.Mesh[] = [];
@@ -194,11 +195,11 @@ export function discoverFacsMorphs(scene: THREE.Object3D): Map<FacsMorphName, { 
     // Sort: highest priority first so Genesis9 face mesh is discovered before eyebrow fibers
     morphMeshes.sort((a, b) => meshPriority(b) - meshPriority(a));
 
-    console.log(`[MorphDiscovery] Found ${morphMeshes.length} meshes with morphs (sorted by priority):`);
+    log.debug(`[MorphDiscovery] Found ${morphMeshes.length} meshes with morphs (sorted by priority):`);
     morphMeshes.forEach(m => {
         const mats = Array.isArray(m.material) ? m.material : [m.material];
         const matNames = mats.map(mat => mat?.name || 'unnamed').join(', ');
-        console.log(`[MorphDiscovery]   [pri=${meshPriority(m)}] "${m.name}" — ${Object.keys(m.morphTargetDictionary!).length} morphs — materials: ${matNames}`);
+        log.debug(`[MorphDiscovery]   [pri=${meshPriority(m)}] "${m.name}" — ${Object.keys(m.morphTargetDictionary!).length} morphs — materials: ${matNames}`);
     });
 
     // Phase 2: Discover morphs in priority order
@@ -270,14 +271,14 @@ export function discoverFacsMorphs(scene: THREE.Object3D): Map<FacsMorphName, { 
         }
     }
 
-    console.log(`[MorphDiscovery] Discovery complete: found ${result.size}/${Object.keys(FACS_MORPH_NAMES).length} morphs`);
+    log.debug(`[MorphDiscovery] Discovery complete: found ${result.size}/${Object.keys(FACS_MORPH_NAMES).length} morphs`);
 
     const meshCounts = new Map<string, number>();
     for (const { mesh } of result.values()) {
         meshCounts.set(mesh.name, (meshCounts.get(mesh.name) || 0) + 1);
     }
     for (const [name, count] of meshCounts) {
-        console.log(`[MorphDiscovery]   ${name}: ${count} morphs`);
+        log.debug(`[MorphDiscovery]   ${name}: ${count} morphs`);
     }
 
     return result;
@@ -287,7 +288,7 @@ export function discoverFacsMorphs(scene: THREE.Object3D): Map<FacsMorphName, { 
  * Logs all morphs found in a scene for debugging
  */
 export function logAllMorphs(scene: THREE.Object3D): void {
-    console.log("[MorphDiscovery] Scanning all meshes for morph targets...");
+    log.debug("[MorphDiscovery] Scanning all meshes for morph targets...");
 
     scene.traverse((obj) => {
         if (!(obj instanceof THREE.Mesh)) return;
@@ -298,14 +299,14 @@ export function logAllMorphs(scene: THREE.Object3D): void {
         const morphNames = Object.keys(mesh.morphTargetDictionary);
         if (morphNames.length === 0) return;
 
-        console.log(`[MorphDiscovery] Mesh "${mesh.name}" has ${morphNames.length} morphs:`);
+        log.debug(`[MorphDiscovery] Mesh "${mesh.name}" has ${morphNames.length} morphs:`);
         morphNames.sort().forEach((name, i) => {
             if (i < 20) {
-                console.log(`  [${mesh.morphTargetDictionary![name]}] ${name}`);
+                log.debug(`  [${mesh.morphTargetDictionary![name]}] ${name}`);
             }
         });
         if (morphNames.length > 20) {
-            console.log(`  ... and ${morphNames.length - 20} more`);
+            log.debug(`  ... and ${morphNames.length - 20} more`);
         }
     });
 }
@@ -629,7 +630,7 @@ export class FacsMorphController {
 
     constructor(scene: THREE.Object3D) {
         this.morphMap = discoverFacsMorphs(scene);
-        console.log(`[FacsMorphController] ${summarizeMorphDiscovery(this.morphMap)}`);
+        log.debug(`[FacsMorphController] ${summarizeMorphDiscovery(this.morphMap)}`);
     }
 
     get availableMorphs(): FacsMorphName[] {

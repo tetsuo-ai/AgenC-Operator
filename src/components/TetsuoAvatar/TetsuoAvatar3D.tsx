@@ -46,10 +46,11 @@ import { QUALITY_PRESETS } from "../../config/renderQuality";
 import { log } from "../../utils/log";
 import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
-import { FacsMorphController, logAllMorphs } from "../../utils/dazMorphMap";
+import { FacsMorphController } from "../../utils/dazMorphMap";
 import { isMobile } from "../../hooks/usePlatform";
-
 const MODEL_PATH = MODEL_CONFIG.path;
+const USE_DRACO = MODEL_CONFIG.draco ? '/draco/' : false;
+const USE_MESHOPT = MODEL_CONFIG.meshopt;
 
 // ============================================================================
 // Configuration Constants (tweak these to adjust behavior)
@@ -74,36 +75,24 @@ const CONFIG = {
   VIGNETTE_DARKNESS: 0.3,         // Edge darkening
   VIGNETTE_OFFSET: 0.3,           // Vignette falloff
 
-  // Lighting — tuned for untextured (white base-color) materials.
-  // Very conservative values to prevent blowout on white surfaces.
-  KEY_LIGHT_INTENSITY: 0.35,      // Main directional — very low for white materials
-  KEY_LIGHT_COLOR: '#fff5e6',
-  FILL_LIGHT_INTENSITY: 0.15,     // Fill to reduce contrast
-  FILL_LIGHT_COLOR: '#e8e4f0',    // Slightly cool fill for dimension
-  RIM_LIGHT_INTENSITY: 0.2,       // Edge definition
-  RIM_LIGHT_COLOR: '#ffe8d6',
-  FACE_SPOT_INTENSITY: 0.08,      // Very subtle face spotlight
-  FACE_SPOT_COLOR: '#fff5e6',
-  AMBIENT_INTENSITY: 0.12,        // Slightly higher ambient for mobile fallback
-  ENVIRONMENT_PRESET: 'apartment' as const,
-  ENVIRONMENT_INTENSITY: 0.15,    // Low IBL — main source of diffuse light
-  TONE_MAPPING_EXPOSURE: 0.55,    // Aggressive reduction to prevent blowout
+  // Lighting — soft studio portrait setup (ref: ref.png).
+  // Even diffuse illumination with warm skin tones, minimal harsh shadows.
+  KEY_LIGHT_INTENSITY: 1.35,      // Main directional — soft key
+  KEY_LIGHT_COLOR: '#fff5e6',     // Warm white
+  FILL_LIGHT_INTENSITY: 0.6,     // Fill to soften shadows
+  FILL_LIGHT_COLOR: '#e8e4f0',   // Slightly cool fill for dimension
+  RIM_LIGHT_INTENSITY: 0.45,     // Edge separation from background
+  RIM_LIGHT_COLOR: '#ffe8d6',    // Warm rim
+  FACE_SPOT_INTENSITY: 0.3,      // Subtle face definition spotlight
+  FACE_SPOT_COLOR: '#fff0e0',    // Warm face fill
+  AMBIENT_INTENSITY: 0.26,       // Base ambient for even lighting
+  ENVIRONMENT_PRESET: 'studio' as const,
+  ENVIRONMENT_INTENSITY: 0.45,   // IBL for soft wrap-around diffuse
+  TONE_MAPPING_EXPOSURE: 0.85,   // Slightly dimmer exposure
 
   // Debug
   DEBUG_ANIMATIONS: false,        // Log animation state (enable for troubleshooting)
 } as const;
-
-// ============================================================================
-// Mobile Material Override
-// ============================================================================
-// Android WebView GPU can't handle the Genesis 9 model's textures.
-// On mobile, we strip ALL textures and force category-based colors directly.
-// This produces a clean colored mannequin look that's recognizable and performs well.
-
-// DISABLED: Mobile material override — testing with original textures
-// /** Colors applied to each material category on mobile (no textures) */
-// const MOBILE_COLORS = { ... };
-// function applyMobileMaterialOverride(scene: THREE.Object3D): void { ... }
 
 // ============================================================================
 // Props Interface
@@ -314,7 +303,7 @@ interface ReactiveModelProps {
 }
 
 function ReactiveModel({ appearance, status }: ReactiveModelProps) {
-  const gltf = useGLTF(MODEL_PATH, '/draco/');
+  const gltf = useGLTF(MODEL_PATH, USE_DRACO, USE_MESHOPT);
   const groupRef = useRef<THREE.Group>(null);
   const materialRefsRef = useRef<Map<string, MaterialRef>>(new Map());
   const timeRef = useRef(0);
@@ -388,117 +377,16 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   // Standard clone(true) breaks SkinnedMesh: cloned meshes still reference
   // the ORIGINAL bones, so bone rotations have no visual effect.
   const clonedScene = useMemo(() => {
-    // ═══════════════════════════════════════════════════════════════════════
-    // MORPH TARGET DIAGNOSTIC — check original gltf.scene BEFORE cloning
-    // ═══════════════════════════════════════════════════════════════════════
-    log.info("[MorphDiag] ════ ORIGINAL gltf.scene morph target audit ════");
-    let totalMorphMeshes = 0;
-    gltf.scene.traverse((obj: THREE.Object3D) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-
-      const geom = mesh.geometry;
-      const hasMorphAttrs = geom?.morphAttributes && Object.keys(geom.morphAttributes).length > 0;
-      const hasDict = mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length > 0;
-      const hasInfluences = mesh.morphTargetInfluences && mesh.morphTargetInfluences.length > 0;
-      const isSkinned = !!(mesh as THREE.SkinnedMesh).isSkinnedMesh;
-
-      if (hasMorphAttrs || hasDict || hasInfluences) {
-        totalMorphMeshes++;
-        const morphAttrKeys = geom?.morphAttributes ? Object.keys(geom.morphAttributes) : [];
-        const morphAttrCounts = morphAttrKeys.map(k => `${k}:${(geom.morphAttributes as Record<string, THREE.BufferAttribute[]>)[k]?.length ?? 0}`);
-        const dictSize = mesh.morphTargetDictionary ? Object.keys(mesh.morphTargetDictionary).length : 0;
-        const infLen = mesh.morphTargetInfluences?.length ?? 0;
-        log.info(`[MorphDiag]   "${mesh.name}" skinned=${isSkinned} morphAttrs=[${morphAttrCounts.join(', ')}] dict=${dictSize} influences=${infLen}`);
-        if (mesh.morphTargetDictionary) {
-          const sampleKeys = Object.keys(mesh.morphTargetDictionary).slice(0, 3);
-          log.info(`[MorphDiag]     Sample morph keys: ${sampleKeys.join(', ')}${dictSize > 3 ? ` ... (+${dictSize - 3})` : ''}`);
-        }
-      } else if (/genesis9/i.test(mesh.name)) {
-        // Always log Genesis9 meshes even if no morphs found
-        const morphAttrKeys = geom?.morphAttributes ? Object.keys(geom.morphAttributes) : [];
-        log.warn(`[MorphDiag]   "${mesh.name}" skinned=${isSkinned} NO MORPHS — morphAttrKeys=[${morphAttrKeys.join(',')}] dict=${mesh.morphTargetDictionary ? 'exists(empty)' : 'null'} influences=${mesh.morphTargetInfluences?.length ?? 'null'}`);
-      }
-    });
-    log.info(`[MorphDiag] Total meshes with morphs in original scene: ${totalMorphMeshes}`);
-    log.info("[MorphDiag] ════ END original scene audit ════");
-
     // SkeletonUtils.clone properly rebinds skeleton bones to the cloned scene.
     // Standard clone(true) leaves SkinnedMesh referencing original bones.
     const clone = SkeletonUtils.clone(gltf.scene);
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // MORPH TARGET DIAGNOSTIC — check CLONED scene AFTER cloning
-    // ═══════════════════════════════════════════════════════════════════════
-    log.info("[MorphDiag] ════ CLONED scene morph target audit ════");
-    let cloneMorphMeshes = 0;
-    clone.traverse((obj: THREE.Object3D) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-
-      const geom = mesh.geometry;
-      const hasMorphAttrs = geom?.morphAttributes && Object.keys(geom.morphAttributes).length > 0;
-      const hasDict = mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length > 0;
-      const hasInfluences = mesh.morphTargetInfluences && mesh.morphTargetInfluences.length > 0;
-
-      if (hasMorphAttrs || hasDict || hasInfluences) {
-        cloneMorphMeshes++;
-        const dictSize = mesh.morphTargetDictionary ? Object.keys(mesh.morphTargetDictionary).length : 0;
-        const infLen = mesh.morphTargetInfluences?.length ?? 0;
-        log.info(`[MorphDiag]   CLONE "${mesh.name}" dict=${dictSize} influences=${infLen}`);
-      } else if (/genesis9/i.test(mesh.name)) {
-        log.warn(`[MorphDiag]   CLONE "${mesh.name}" NO MORPHS`);
-      }
-    });
-    log.info(`[MorphDiag] Total meshes with morphs in cloned scene: ${cloneMorphMeshes}`);
-    log.info("[MorphDiag] ════ END cloned scene audit ════");
-
-    // Diagnostic: log scene root and children transforms to detect baked-in rotation
-    const r = gltf.scene.rotation;
-    const s = gltf.scene.scale;
-    log.info(`[TetsuoAvatar3D] GLB scene root rotation: (${r.x.toFixed(3)}, ${r.y.toFixed(3)}, ${r.z.toFixed(3)}) order=${r.order}`);
-    log.info(`[TetsuoAvatar3D] GLB scene root scale: (${s.x.toFixed(3)}, ${s.y.toFixed(3)}, ${s.z.toFixed(3)})`);
-    gltf.scene.children.forEach((child, i) => {
-      const cr = child.rotation;
-      const cs = child.scale;
-      const cp = child.position;
-      log.info(`[TetsuoAvatar3D] Child[${i}] "${child.name}" type=${child.type} pos=(${cp.x.toFixed(1)}, ${cp.y.toFixed(1)}, ${cp.z.toFixed(1)}) rot=(${cr.x.toFixed(3)}, ${cr.y.toFixed(3)}, ${cr.z.toFixed(3)}) scale=(${cs.x.toFixed(3)}, ${cs.y.toFixed(3)}, ${cs.z.toFixed(3)})`);
-      // For the Cube, log its bounding box
-      if (child.name === 'Cube' && (child as THREE.Mesh).isMesh) {
-        const cubeMesh = child as THREE.Mesh;
-        const cBox = new THREE.Box3().setFromObject(cubeMesh);
-        const cSize = new THREE.Vector3();
-        const cCenter = new THREE.Vector3();
-        cBox.getSize(cSize);
-        cBox.getCenter(cCenter);
-        log.info(`[TetsuoAvatar3D] Cube bbox: center=(${cCenter.x.toFixed(1)}, ${cCenter.y.toFixed(1)}, ${cCenter.z.toFixed(1)}) size=(${cSize.x.toFixed(1)}, ${cSize.y.toFixed(1)}, ${cSize.z.toFixed(1)})`);
-        log.info(`[TetsuoAvatar3D] Cube material: ${cubeMesh.material ? ((cubeMesh.material as THREE.Material).type + ' visible=' + (cubeMesh.material as THREE.Material).visible) : 'none'}`);
-      }
-    });
-
-    // TEMP DIAGNOSTIC: hide Cube and Sketchfab_model (hair) to test face visibility
+    // Hide non-avatar meshes from the GLB export
     clone.children.forEach((child) => {
-      if (child.name === 'Cube') {
+      if (child.name === 'Cube' || child.name === 'Sketchfab_model') {
         child.visible = false;
-        log.info(`[TetsuoAvatar3D] TEMP: Hidden Cube`);
-      }
-      if (child.name === 'Sketchfab_model') {
-        child.visible = false;
-        log.info(`[TetsuoAvatar3D] TEMP: Hidden Sketchfab_model (hair)`);
       }
     });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // MOBILE MATERIAL OVERRIDE
-    // Strip ALL textures and force category-based colors on mobile.
-    // This prevents the white blob caused by GPU memory exhaustion.
-    // Must run BEFORE the general material fix pass below.
-    // ═══════════════════════════════════════════════════════════════════════
-    // DISABLED: Mobile material override — testing with original textures
-    // if (isMobile()) {
-    //   log.info('[TetsuoAvatar3D] Mobile detected — applying material override (no textures, forced colors)');
-    //   applyMobileMaterialOverride(clone);
-    // }
 
     // Scale model from meters to centimeters.
     // The GLB is authored in meters (1.70m tall) but the camera system
@@ -513,7 +401,6 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // inaccurate after bone animations (T-pose correction, etc.)
     let meshCount = 0;
     let skinnedMeshCount = 0;
-    const eyeMeshReport: string[] = [];
     clone.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         child.frustumCulled = false;
@@ -524,14 +411,6 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
         mats.forEach((m) => {
           const stdMat = m as THREE.MeshStandardMaterial;
           const physMat = m as THREE.MeshPhysicalMaterial;
-
-          // Log eye-related meshes for debugging
-          const nameCheck = `${child.name} ${m.name || ''}`.toLowerCase();
-          if (/eye|iris|pupil|cornea|sclera|moisture|refract|tearline|occlusion/.test(nameCheck)) {
-            const hasMap = stdMat.map ? 'has texture' : 'no texture';
-            const hasEmissiveMap = stdMat.emissiveMap ? 'has emissiveMap' : '';
-            eyeMeshReport.push(`  ${child.name} / ${m.name || 'unnamed'} [${hasMap}${hasEmissiveMap ? ', ' + hasEmissiveMap : ''}]`);
-          }
 
           // Check if this is an eye overlay material (cornea, moisture, refraction, etc.)
           // These layers sit ON TOP of the iris/pupil and must stay transparent,
@@ -590,55 +469,6 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     });
     log.info(`[TetsuoAvatar3D] Material fix applied to ${meshCount} meshes (${skinnedMeshCount} skinned)`);
 
-    // Diagnostic: log baseColorFactor for key materials
-    clone.traverse((child2) => {
-      if ((child2 as THREE.Mesh).isMesh) {
-        const mesh2 = child2 as THREE.Mesh;
-        const mats2 = Array.isArray(mesh2.material) ? mesh2.material : [mesh2.material];
-        mats2.forEach((m2) => {
-          const std2 = m2 as THREE.MeshStandardMaterial;
-          const name2 = `${child2.name}/${m2.name || 'unnamed'}`;
-          if (/skin|face|head|body|torso|genesis/i.test(name2) && !(/hair|strand|bangs|nmixx/i.test(name2))) {
-            const c = std2.color;
-            log.info(`[TetsuoAvatar3D] Material "${name2}" color=(${c.r.toFixed(3)}, ${c.g.toFixed(3)}, ${c.b.toFixed(3)}) hasMap=${!!std2.map} transparent=${std2.transparent} visible=${std2.visible}`);
-          }
-        });
-      }
-    });
-
-    // Diagnostic: log key bone world positions
-    const diagBones = ['head', 'l_eye', 'r_eye', 'l_shoulder', 'r_shoulder', 'l_upperarm', 'r_upperarm', 'l_forearm', 'r_forearm'];
-    clone.traverse((obj) => {
-      if (obj instanceof THREE.Bone && diagBones.includes(obj.name.toLowerCase())) {
-        obj.updateWorldMatrix(true, false);
-        const pos = new THREE.Vector3().setFromMatrixPosition(obj.matrixWorld);
-        log.info(`[TetsuoAvatar3D] Bone "${obj.name}" world pos: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
-      }
-    });
-
-    // Diagnostic: compute face forward direction (head → midpoint of eyes)
-    const bonePositions: Record<string, THREE.Vector3> = {};
-    clone.traverse((obj2) => {
-      if (obj2 instanceof THREE.Bone && ['head', 'l_eye', 'r_eye'].includes(obj2.name.toLowerCase())) {
-        obj2.updateWorldMatrix(true, false);
-        bonePositions[obj2.name.toLowerCase()] = new THREE.Vector3().setFromMatrixPosition(obj2.matrixWorld);
-      }
-    });
-    if (bonePositions['head'] && bonePositions['l_eye'] && bonePositions['r_eye']) {
-      const eyeCenter = bonePositions['l_eye'].clone().add(bonePositions['r_eye']).multiplyScalar(0.5);
-      const faceDir = eyeCenter.clone().sub(bonePositions['head']).normalize();
-      log.info(`[TetsuoAvatar3D] Face forward dir (head→eyes): (${faceDir.x.toFixed(3)}, ${faceDir.y.toFixed(3)}, ${faceDir.z.toFixed(3)})`);
-      log.info(`[TetsuoAvatar3D] Eye center world pos: (${eyeCenter.x.toFixed(1)}, ${eyeCenter.y.toFixed(1)}, ${eyeCenter.z.toFixed(1)})`);
-    }
-
-    // Log eye mesh report so we can verify iris/pupil geometry exists
-    if (eyeMeshReport.length > 0) {
-      log.info(`[TetsuoAvatar3D] Eye-related meshes found (${eyeMeshReport.length}):`);
-      eyeMeshReport.forEach((line) => log.info(line));
-    } else {
-      log.warn('[TetsuoAvatar3D] NO eye-related meshes found in model - export may be missing eye geometry');
-    }
-
     return clone;
   }, [gltf.scene]);
 
@@ -666,45 +496,20 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
 
   useEffect(() => {
     if (!animationsInitializedRef.current && clonedScene) {
-      log.info("[TetsuoAvatar3D] ╔════════════════════════════════════════════╗");
-      log.info("[TetsuoAvatar3D] ║     GENESIS 9 ANIMATION INITIALIZATION    ║");
-      log.info("[TetsuoAvatar3D] ╚════════════════════════════════════════════╝");
-
-      // Initialize MouthDriver (for audio amplitude)
-      log.info("[TetsuoAvatar3D] Initializing MouthDriver...");
+      // Initialize all animation subsystems in dependency order
       mouthAnimation.initialize(clonedScene);
-
-      // Initialize unified Genesis animation system
-      log.info("[TetsuoAvatar3D] Initializing GenesisAnimation...");
       genesisAnimation.initialize(clonedScene);
-
-      // Initialize facial expression system (smile, eyebrows, eyes)
-      log.info("[TetsuoAvatar3D] Initializing ExpressionSystem...");
       expressionSystem.initialize(clonedScene);
-
-      // Initialize idle animation (breathing, sway, micro-movements, blinking)
-      // Must be AFTER genesisAnimation so it captures corrected T-pose rest poses
-      log.info("[TetsuoAvatar3D] Initializing IdleAnimation...");
+      // IdleAnimation must be AFTER genesisAnimation (captures corrected rest poses)
       idleAnimation.initialize(clonedScene);
-
-      // Initialize talking animation (head nods, gestures, shrugs)
-      log.info("[TetsuoAvatar3D] Initializing TalkingAnimation...");
       talkingAnimation.initialize(clonedScene);
-
-      // Initialize gaze tracking (head/eye cursor following)
-      log.info("[TetsuoAvatar3D] Initializing GazeTracking...");
       gazeTracking.initialize(clonedScene);
-
-      // Initialize wiggle bones for hair/accessory physics (async - loads wiggle lib)
-      log.info("[TetsuoAvatar3D] Initializing WiggleBones...");
       wiggleBones.initialize(clonedScene);
 
-      // Initialize FACS morph controller (discovers all morph targets on all meshes)
-      log.info("[TetsuoAvatar3D] Initializing FacsMorphController...");
-      logAllMorphs(clonedScene);
+      // FACS morph controller (discovers all morph targets on all meshes)
       const controller = new FacsMorphController(clonedScene);
       morphControllerRef.current = controller;
-      log.info(`[TetsuoAvatar3D] FacsMorphController: ${controller.morphCount} morphs found — ${controller.availableMorphs.join(', ')}`);
+      log.info(`[TetsuoAvatar3D] Animation init complete — ${controller.morphCount} FACS morphs`);
 
       // Pass morph controller to animation hooks
       mouthAnimation.setMorphController(controller);
@@ -1092,23 +897,8 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
   // Animation Loop
   // ========================================
 
-  const camLogTimer = useRef(0);
-  useFrame(({ camera }, delta) => {
+  useFrame((_state, delta) => {
     timeRef.current += delta;
-    camLogTimer.current += delta;
-    // Log camera position once every 5 seconds
-    if (camLogTimer.current > 5) {
-      camLogTimer.current = 0;
-      const dir = new THREE.Vector3();
-      camera.getWorldDirection(dir);
-      log.info(`[Camera] pos=(${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}) dir=(${dir.x.toFixed(3)}, ${dir.y.toFixed(3)}, ${dir.z.toFixed(3)}) fov=${(camera as THREE.PerspectiveCamera).fov}`);
-      // Log model group world position
-      if (groupRef.current) {
-        const wp = new THREE.Vector3();
-        groupRef.current.getWorldPosition(wp);
-        log.info(`[Camera] group world pos=(${wp.x.toFixed(1)}, ${wp.y.toFixed(1)}, ${wp.z.toFixed(1)})`);
-      }
-    }
     const isSpeaking = status.mode === 'speaking';
 
     // Update eye glow based on voice state
@@ -1316,7 +1106,7 @@ export default function TetsuoAvatar3D({
 export function preloadModel() {
   try {
     log.info("[TetsuoAvatar3D] Preloading model: " + MODEL_PATH);
-    useGLTF.preload(MODEL_PATH, '/draco/');
+    useGLTF.preload(MODEL_PATH, USE_DRACO, USE_MESHOPT);
   } catch (e) {
     log.warn("[TetsuoAvatar3D] Failed to preload model: " + e);
   }
