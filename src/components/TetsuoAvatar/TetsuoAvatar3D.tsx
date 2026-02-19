@@ -48,6 +48,7 @@ import { MODEL_CONFIG, categorizeMaterial } from "../../config/modelConfig";
 import { VISEME_SHAPES, type VisemeId } from "../../constants/visemeMap";
 import { FacsMorphController } from "../../utils/dazMorphMap";
 import { isMobile } from "../../hooks/usePlatform";
+import { useEquipmentSystem } from "../../hooks/useEquipmentSystem";
 const MODEL_PATH = MODEL_CONFIG.path;
 const USE_DRACO = MODEL_CONFIG.draco ? '/draco/' : false;
 const USE_MESHOPT = MODEL_CONFIG.meshopt;
@@ -489,6 +490,9 @@ function ReactiveModel({ appearance, status }: ReactiveModelProps) {
     // Horizontal centering keeps model in frame
     return new THREE.Vector3(-center.x, -box.min.y, -center.z);
   }, [clonedScene]);
+
+  // Equipment system — attaches store item GLBs to skeleton bones
+  useEquipmentSystem(clonedScene);
 
   // ========================================
   // Initialize Animation Systems

@@ -32,6 +32,8 @@ use operator_core::{
     // Database
     DbTaskStatus, DbOperatorConfig, OperatorDb, TaskRecord, SessionState, TranscriptEntry,
     VerificationLog,
+    // Store types
+    StoreItemCategory, UserInventory, UserInventoryEntry, EquippedItems,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -3360,6 +3362,273 @@ fn frontend_log(level: String, message: String) {
 }
 
 // ============================================================================
+// Store / Marketplace Commands
+// ============================================================================
+
+#[tauri::command]
+async fn list_store_items(
+    state: State<'_, AppState>,
+    category: Option<String>,
+) -> Result<AsyncResult<Vec<serde_json::Value>>, String> {
+    debug!("[IPC] list_store_items (category={:?})", category);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let cat_filter = category.as_deref().and_then(StoreItemCategory::from_str);
+
+            match db.list_items(cat_filter.as_ref()) {
+                Ok(items) => {
+                    let json_items: Vec<serde_json::Value> = items
+                        .iter()
+                        .map(|i| serde_json::to_value(i).unwrap_or_default())
+                        .collect();
+                    Ok(AsyncResult::ok(json_items))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn get_store_item(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] get_store_item (id={})", item_id);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.get_item(&item_id) {
+            Ok(Some(item)) => Ok(AsyncResult::ok(serde_json::to_value(item).unwrap_or_default())),
+            Ok(None) => Ok(AsyncResult::err(format!("Item not found: {}", item_id))),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn buy_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    wallet_address: String,
+) -> Result<AsyncResult<bool>, String> {
+    debug!("[IPC] buy_item (id={}, wallet={})", item_id, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            // Verify item exists
+            match db.get_item(&item_id) {
+                Ok(Some(_)) => {}
+                Ok(None) => return Ok(AsyncResult::err(format!("Item not found: {}", item_id))),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            }
+
+            // Get or create inventory
+            let mut inventory = db.get_inventory(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| UserInventory {
+                    wallet_address: wallet_address.clone(),
+                    items: Vec::new(),
+                });
+
+            // Check if already owned
+            if inventory.items.iter().any(|e| e.item_id == item_id) {
+                return Ok(AsyncResult::err("Item already owned".to_string()));
+            }
+
+            // Add to inventory (UI-only purchase, no real transaction)
+            inventory.items.push(UserInventoryEntry {
+                item_id: item_id.clone(),
+                acquired_at: chrono::Utc::now().timestamp(),
+            });
+
+            match db.store_inventory(&inventory) {
+                Ok(_) => {
+                    info!("[Store] Purchased item {} for wallet {}", item_id, wallet_address);
+                    Ok(AsyncResult::ok(true))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn sell_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    wallet_address: String,
+) -> Result<AsyncResult<bool>, String> {
+    debug!("[IPC] sell_item (id={}, wallet={})", item_id, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let mut inventory = match db.get_inventory(&wallet_address) {
+                Ok(Some(inv)) => inv,
+                Ok(None) => return Ok(AsyncResult::err("No inventory found".to_string())),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            };
+
+            let before_len = inventory.items.len();
+            inventory.items.retain(|e| e.item_id != item_id);
+
+            if inventory.items.len() == before_len {
+                return Ok(AsyncResult::err("Item not in inventory".to_string()));
+            }
+
+            // Also unequip if currently equipped
+            if let Ok(Some(mut equipped)) = db.get_equipped(&wallet_address) {
+                equipped.slots.retain(|_, v| v != &item_id);
+                let _ = db.store_equipped(&equipped);
+            }
+
+            match db.store_inventory(&inventory) {
+                Ok(_) => {
+                    info!("[Store] Sold item {} from wallet {}", item_id, wallet_address);
+                    Ok(AsyncResult::ok(true))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn get_inventory(
+    state: State<'_, AppState>,
+    wallet_address: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] get_inventory (wallet={})", wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let inventory = db.get_inventory(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| UserInventory {
+                    wallet_address: wallet_address.clone(),
+                    items: Vec::new(),
+                });
+            Ok(AsyncResult::ok(serde_json::to_value(inventory).unwrap_or_default()))
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn equip_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    wallet_address: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] equip_item (id={}, wallet={})", item_id, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            // Check item exists and get its slot
+            let item = match db.get_item(&item_id) {
+                Ok(Some(item)) => item,
+                Ok(None) => return Ok(AsyncResult::err(format!("Item not found: {}", item_id))),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            };
+
+            // Check item is owned
+            let inventory = db.get_inventory(&wallet_address).unwrap_or(None);
+            let owned = inventory.as_ref()
+                .map(|inv| inv.items.iter().any(|e| e.item_id == item_id))
+                .unwrap_or(false);
+            if !owned {
+                return Ok(AsyncResult::err("Item not owned".to_string()));
+            }
+
+            // Get or create equipped state
+            let mut equipped = db.get_equipped(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| EquippedItems {
+                    wallet_address: wallet_address.clone(),
+                    slots: std::collections::HashMap::new(),
+                });
+
+            // Set slot (replaces any existing item in that slot)
+            equipped.slots.insert(item.slot.clone(), item_id.clone());
+
+            match db.store_equipped(&equipped) {
+                Ok(_) => {
+                    info!("[Store] Equipped item {} in slot {} for wallet {}", item_id, item.slot, wallet_address);
+                    Ok(AsyncResult::ok(serde_json::to_value(&equipped).unwrap_or_default()))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn unequip_item(
+    state: State<'_, AppState>,
+    slot: String,
+    wallet_address: String,
+) -> Result<AsyncResult<bool>, String> {
+    debug!("[IPC] unequip_item (slot={}, wallet={})", slot, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let mut equipped = match db.get_equipped(&wallet_address) {
+                Ok(Some(eq)) => eq,
+                Ok(None) => return Ok(AsyncResult::err("Nothing equipped".to_string())),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            };
+
+            if equipped.slots.remove(&slot).is_none() {
+                return Ok(AsyncResult::err(format!("Nothing equipped in slot: {}", slot)));
+            }
+
+            match db.store_equipped(&equipped) {
+                Ok(_) => {
+                    info!("[Store] Unequipped slot {} for wallet {}", slot, wallet_address);
+                    Ok(AsyncResult::ok(true))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn get_equipped(
+    state: State<'_, AppState>,
+    wallet_address: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] get_equipped (wallet={})", wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let equipped = db.get_equipped(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| EquippedItems {
+                    wallet_address: wallet_address.clone(),
+                    slots: std::collections::HashMap::new(),
+                });
+            Ok(AsyncResult::ok(serde_json::to_value(equipped).unwrap_or_default()))
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+// ============================================================================
 // Database Commands (Phase 5)
 // ============================================================================
 
@@ -3986,6 +4255,15 @@ pub fn run() {
             // Config
             set_rpc_url,
             get_config,
+            // Store / Marketplace
+            list_store_items,
+            get_store_item,
+            buy_item,
+            sell_item,
+            get_inventory,
+            equip_item,
+            unequip_item,
+            get_equipped,
             // Database (Phase 5)
             db_list_tasks,
             db_get_task,

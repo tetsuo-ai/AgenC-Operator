@@ -648,3 +648,43 @@ export interface DeviceCommandResult {
   message: string;
   data?: unknown;
 }
+
+// ============================================================================
+// Store / Marketplace Types
+// ============================================================================
+
+export type StoreItemCategory = 'clothing' | 'accessory' | 'hair' | 'eyes' | 'headwear' | 'footwear';
+
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+
+export interface StoreItem {
+  id: string;
+  name: string;
+  description: string;
+  category: StoreItemCategory;
+  price: number;
+  rarity: ItemRarity;
+  thumbnail_url: string;
+  glb_path: string;
+  attach_bone: string;
+  scale: [number, number, number];
+  offset: [number, number, number];
+  rotation: [number, number, number];
+  slot: string;
+  created_at: number;
+}
+
+export interface UserInventoryEntry {
+  item_id: string;
+  acquired_at: number;
+}
+
+export interface UserInventory {
+  wallet_address: string;
+  items: UserInventoryEntry[];
+}
+
+export interface EquippedItems {
+  wallet_address: string;
+  slots: Record<string, string>;
+}

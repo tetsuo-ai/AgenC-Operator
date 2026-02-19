@@ -5,8 +5,12 @@
 // Default path: ~/.agenc/operator.redb (override via AGENC_DB_PATH env var)
 // ============================================================================
 
+pub mod store_types;
 pub mod types;
 
+pub use store_types::{
+    EquippedItems, ItemRarity, StoreItem, StoreItemCategory, UserInventory, UserInventoryEntry,
+};
 pub use types::{
     DbStats, DbTaskStatus, OperatorConfig, SessionState, TaskRecord, TranscriptEntry,
     VerificationLog,
@@ -23,6 +27,8 @@ const SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("sessions");
 const PROOFS: TableDefinition<&str, &[u8]> = TableDefinition::new("proofs");
 const CONFIG: TableDefinition<&str, &[u8]> = TableDefinition::new("config");
 const DEVICES: TableDefinition<&str, &[u8]> = TableDefinition::new("devices");
+const STORE_ITEMS: TableDefinition<&str, &[u8]> = TableDefinition::new("store_items");
+const USER_INVENTORY: TableDefinition<&str, &[u8]> = TableDefinition::new("user_inventory");
 
 /// Embedded database for the AgenC operator
 pub struct OperatorDb {
@@ -61,12 +67,21 @@ impl OperatorDb {
             let _ = write_txn.open_table(PROOFS).map_err(|e| anyhow!("Failed to create proofs table: {}", e))?;
             let _ = write_txn.open_table(CONFIG).map_err(|e| anyhow!("Failed to create config table: {}", e))?;
             let _ = write_txn.open_table(DEVICES).map_err(|e| anyhow!("Failed to create devices table: {}", e))?;
+            let _ = write_txn.open_table(STORE_ITEMS).map_err(|e| anyhow!("Failed to create store_items table: {}", e))?;
+            let _ = write_txn.open_table(USER_INVENTORY).map_err(|e| anyhow!("Failed to create user_inventory table: {}", e))?;
         }
         write_txn.commit().map_err(|e| anyhow!("Failed to commit init: {}", e))?;
 
+        let instance = Self { db, path: db_path };
+
+        // Seed store catalog on first run
+        if let Err(e) = instance.seed_store_items() {
+            tracing::warn!("Failed to seed store items: {}", e);
+        }
+
         info!("Database ready");
 
-        Ok(Self { db, path: db_path })
+        Ok(instance)
     }
 
     /// Get the database file path
@@ -538,6 +553,333 @@ impl OperatorDb {
         device.agent_config = Some(config);
         self.store_device(&device)?;
         debug!("Updated device {} config", device_id);
+        Ok(())
+    }
+
+    // ========================================================================
+    // Store Item Operations
+    // ========================================================================
+
+    pub fn store_item(&self, item: &StoreItem) -> Result<()> {
+        let key = format!("store_items:{}", item.id);
+        let value = bincode::serialize(item)
+            .map_err(|e| anyhow!("Failed to serialize store item: {}", e))?;
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        {
+            let mut table = write_txn.open_table(STORE_ITEMS)
+                .map_err(|e| anyhow!("Failed to open store_items table: {}", e))?;
+            table.insert(key.as_str(), value.as_slice())
+                .map_err(|e| anyhow!("Failed to insert store item: {}", e))?;
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored item: {}", item.id);
+        Ok(())
+    }
+
+    pub fn get_item(&self, item_id: &str) -> Result<Option<StoreItem>> {
+        let key = format!("store_items:{}", item_id);
+
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(STORE_ITEMS)
+            .map_err(|e| anyhow!("Failed to open store_items table: {}", e))?;
+
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get item: {}", e))? {
+            Some(value) => {
+                let item: StoreItem = bincode::deserialize(value.value())
+                    .map_err(|e| anyhow!("Failed to deserialize item: {}", e))?;
+                Ok(Some(item))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_items(&self, category_filter: Option<&StoreItemCategory>) -> Result<Vec<StoreItem>> {
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(STORE_ITEMS)
+            .map_err(|e| anyhow!("Failed to open store_items table: {}", e))?;
+
+        let mut results = Vec::new();
+        let iter = table.range::<&str>(..)
+            .map_err(|e| anyhow!("Failed to iterate store items: {}", e))?;
+        for entry in iter {
+            let (_key, value) = entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
+            let item: StoreItem = bincode::deserialize(value.value())
+                .map_err(|e| anyhow!("Failed to deserialize item: {}", e))?;
+
+            if let Some(filter) = category_filter {
+                if &item.category == filter {
+                    results.push(item);
+                }
+            } else {
+                results.push(item);
+            }
+        }
+        Ok(results)
+    }
+
+    // ========================================================================
+    // User Inventory Operations
+    // ========================================================================
+
+    pub fn store_inventory(&self, inventory: &UserInventory) -> Result<()> {
+        let key = format!("inventory:{}", inventory.wallet_address);
+        let value = bincode::serialize(inventory)
+            .map_err(|e| anyhow!("Failed to serialize inventory: {}", e))?;
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        {
+            let mut table = write_txn.open_table(USER_INVENTORY)
+                .map_err(|e| anyhow!("Failed to open user_inventory table: {}", e))?;
+            table.insert(key.as_str(), value.as_slice())
+                .map_err(|e| anyhow!("Failed to insert inventory: {}", e))?;
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored inventory for wallet: {}", inventory.wallet_address);
+        Ok(())
+    }
+
+    pub fn get_inventory(&self, wallet_address: &str) -> Result<Option<UserInventory>> {
+        let key = format!("inventory:{}", wallet_address);
+
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(USER_INVENTORY)
+            .map_err(|e| anyhow!("Failed to open user_inventory table: {}", e))?;
+
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get inventory: {}", e))? {
+            Some(value) => {
+                let inv: UserInventory = bincode::deserialize(value.value())
+                    .map_err(|e| anyhow!("Failed to deserialize inventory: {}", e))?;
+                Ok(Some(inv))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn store_equipped(&self, equipped: &EquippedItems) -> Result<()> {
+        let key = format!("equipped:{}", equipped.wallet_address);
+        let value = bincode::serialize(equipped)
+            .map_err(|e| anyhow!("Failed to serialize equipped items: {}", e))?;
+
+        let write_txn = self.db.begin_write()
+            .map_err(|e| anyhow!("Failed to begin write: {}", e))?;
+        {
+            let mut table = write_txn.open_table(USER_INVENTORY)
+                .map_err(|e| anyhow!("Failed to open user_inventory table: {}", e))?;
+            table.insert(key.as_str(), value.as_slice())
+                .map_err(|e| anyhow!("Failed to insert equipped: {}", e))?;
+        }
+        write_txn.commit().map_err(|e| anyhow!("Failed to commit: {}", e))?;
+
+        debug!("Stored equipped items for wallet: {}", equipped.wallet_address);
+        Ok(())
+    }
+
+    pub fn get_equipped(&self, wallet_address: &str) -> Result<Option<EquippedItems>> {
+        let key = format!("equipped:{}", wallet_address);
+
+        let read_txn = self.db.begin_read()
+            .map_err(|e| anyhow!("Failed to begin read: {}", e))?;
+        let table = read_txn.open_table(USER_INVENTORY)
+            .map_err(|e| anyhow!("Failed to open user_inventory table: {}", e))?;
+
+        match table.get(key.as_str()).map_err(|e| anyhow!("Failed to get equipped: {}", e))? {
+            Some(value) => {
+                let equipped: EquippedItems = bincode::deserialize(value.value())
+                    .map_err(|e| anyhow!("Failed to deserialize equipped: {}", e))?;
+                Ok(Some(equipped))
+            }
+            None => Ok(None),
+        }
+    }
+
+    // ========================================================================
+    // Store Seed Data
+    // ========================================================================
+
+    fn seed_store_items(&self) -> Result<()> {
+        let existing = self.list_items(None)?;
+        if !existing.is_empty() {
+            return Ok(());
+        }
+
+        info!("Seeding store with initial catalog...");
+        let now = chrono::Utc::now().timestamp();
+
+        let items = vec![
+            StoreItem {
+                id: "item_cap_neon".into(),
+                name: "Neon Runner Cap".into(),
+                description: "A sleek cap with embedded neon circuitry that pulses with data.".into(),
+                category: StoreItemCategory::Headwear,
+                price: 500,
+                rarity: ItemRarity::Common,
+                thumbnail_url: "/store/thumbnails/cap_neon.png".into(),
+                glb_path: "/models/store/cap_neon.glb".into(),
+                attach_bone: "head".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.08, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "head".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_jacket_cyber".into(),
+                name: "Cyberpunk Jacket".into(),
+                description: "Armored street jacket with holographic trim and circuit patterns.".into(),
+                category: StoreItemCategory::Clothing,
+                price: 1200,
+                rarity: ItemRarity::Uncommon,
+                thumbnail_url: "/store/thumbnails/jacket_cyber.png".into(),
+                glb_path: "/models/store/jacket_cyber.glb".into(),
+                attach_bone: "spine3".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "torso".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_visor_holo".into(),
+                name: "Holo Visor".into(),
+                description: "Transparent AR visor with real-time data overlay projection.".into(),
+                category: StoreItemCategory::Accessory,
+                price: 800,
+                rarity: ItemRarity::Rare,
+                thumbnail_url: "/store/thumbnails/visor_holo.png".into(),
+                glb_path: "/models/store/visor_holo.glb".into(),
+                attach_bone: "head".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.02, 0.05],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "face".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_boots_platform".into(),
+                name: "Platform Stompers".into(),
+                description: "Heavy-duty platform boots with magnetic soles and LED accents.".into(),
+                category: StoreItemCategory::Footwear,
+                price: 950,
+                rarity: ItemRarity::Common,
+                thumbnail_url: "/store/thumbnails/boots_platform.png".into(),
+                glb_path: "/models/store/boots_platform.glb".into(),
+                attach_bone: "pelvis".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "feet".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_hair_neon_mohawk".into(),
+                name: "Neon Mohawk".into(),
+                description: "Gravity-defying mohawk with programmable neon color strands.".into(),
+                category: StoreItemCategory::Hair,
+                price: 1500,
+                rarity: ItemRarity::Rare,
+                thumbnail_url: "/store/thumbnails/hair_mohawk.png".into(),
+                glb_path: "/models/store/hair_mohawk.glb".into(),
+                attach_bone: "head".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.1, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "hair".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_eyes_cyber".into(),
+                name: "Cyber Optics".into(),
+                description: "Replacement cybernetic eyes with enhanced spectrum analysis.".into(),
+                category: StoreItemCategory::Eyes,
+                price: 2000,
+                rarity: ItemRarity::Epic,
+                thumbnail_url: "/store/thumbnails/eyes_cyber.png".into(),
+                glb_path: "/models/store/eyes_cyber.glb".into(),
+                attach_bone: "head".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.0, 0.02],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "eyes".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_earring_data".into(),
+                name: "Data Earrings".into(),
+                description: "Dangling earrings that display scrolling data streams.".into(),
+                category: StoreItemCategory::Accessory,
+                price: 350,
+                rarity: ItemRarity::Common,
+                thumbnail_url: "/store/thumbnails/earring_data.png".into(),
+                glb_path: "/models/store/earring_data.glb".into(),
+                attach_bone: "head".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, -0.02, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "accessory_1".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_gloves_hacker".into(),
+                name: "Hacker Gloves".into(),
+                description: "Fingerless gloves with integrated holographic keyboard projectors.".into(),
+                category: StoreItemCategory::Clothing,
+                price: 600,
+                rarity: ItemRarity::Uncommon,
+                thumbnail_url: "/store/thumbnails/gloves_hacker.png".into(),
+                glb_path: "/models/store/gloves_hacker.glb".into(),
+                attach_bone: "l_hand".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "hands".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_collar_neon".into(),
+                name: "Neon Choker".into(),
+                description: "Tight-fitting choker that emits a soft neon glow around the neck.".into(),
+                category: StoreItemCategory::Accessory,
+                price: 450,
+                rarity: ItemRarity::Uncommon,
+                thumbnail_url: "/store/thumbnails/collar_neon.png".into(),
+                glb_path: "/models/store/collar_neon.glb".into(),
+                attach_bone: "neckLower".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "accessory_2".into(),
+                created_at: now,
+            },
+            StoreItem {
+                id: "item_wings_holo".into(),
+                name: "Holographic Wings".into(),
+                description: "Ethereal holographic wings that shimmer with chromatic light.".into(),
+                category: StoreItemCategory::Accessory,
+                price: 5000,
+                rarity: ItemRarity::Legendary,
+                thumbnail_url: "/store/thumbnails/wings_holo.png".into(),
+                glb_path: "/models/store/wings_holo.glb".into(),
+                attach_bone: "spine3".into(),
+                scale: [1.0, 1.0, 1.0],
+                offset: [0.0, 0.1, -0.15],
+                rotation: [0.0, 0.0, 0.0],
+                slot: "back".into(),
+                created_at: now,
+            },
+        ];
+
+        for item in &items {
+            self.store_item(item)?;
+        }
+        info!("Seeded {} store items", items.len());
         Ok(())
     }
 }

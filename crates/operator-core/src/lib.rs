@@ -31,6 +31,10 @@ pub use db::{
     DbStats, DbTaskStatus, OperatorConfig as DbOperatorConfig, OperatorDb, SessionState,
     TaskRecord, TranscriptEntry, VerificationLog,
 };
+// Store types
+pub use db::{
+    EquippedItems, ItemRarity, StoreItem, StoreItemCategory, UserInventory, UserInventoryEntry,
+};
 
 // Solana executor
 pub use solana_exec::SolanaExecutor;
