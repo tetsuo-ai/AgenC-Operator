@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 /// Category of a store item
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum StoreItemCategory {
     Clothing,
     Accessory,
@@ -43,6 +44,7 @@ impl StoreItemCategory {
 
 /// Rarity tier for store items
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ItemRarity {
     Common,
     Uncommon,
