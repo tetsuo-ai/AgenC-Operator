@@ -12,7 +12,7 @@ import { motion } from 'framer-motion';
 import { FEATURES } from '../config/platform';
 import { hapticLight } from '../utils/haptics';
 
-type Tab = 'chat' | 'tasks' | 'devices' | 'settings';
+type Tab = 'chat' | 'tasks' | 'store' | 'devices' | 'settings';
 
 interface BottomNavProps {
   activeTab: Tab;
@@ -36,6 +36,15 @@ const TABS: { id: Tab; label: string; icon: JSX.Element }[] = [
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
+    id: 'store',
+    label: 'STORE',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
       </svg>
     ),
   },

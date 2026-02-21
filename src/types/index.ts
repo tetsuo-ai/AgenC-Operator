@@ -147,17 +147,14 @@ export interface AppConfig {
   rpc_url: string;
   network: string;
   whisper_model_path?: string;
-  grok_api_key?: string;
   qdrant_url?: string;
-  openai_api_key?: string;
   // Twitter OAuth 2.0 client ID (public, for PKCE flow)
   twitter_client_id?: string;
-  // Phase 3: Discord, Email, Image config
-  discord_bot_token?: string;
   discord_default_guild_id?: string;
-  resend_api_key?: string;
   email_from_address?: string;
   email_from_name?: string;
+  github_default_owner?: string;
+  github_default_repo?: string;
 }
 
 // ============================================================================
@@ -635,7 +632,6 @@ export interface PairedDevice {
   name: string;
   ip_address: string;
   port: number;
-  shared_secret: string;
   paired_by_wallet: string;
   paired_at: number;
   last_seen: number;
@@ -647,4 +643,44 @@ export interface DeviceCommandResult {
   success: boolean;
   message: string;
   data?: unknown;
+}
+
+// ============================================================================
+// Store / Marketplace Types
+// ============================================================================
+
+export type StoreItemCategory = 'clothing' | 'accessory' | 'hair' | 'eyes' | 'headwear' | 'footwear';
+
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+
+export interface StoreItem {
+  id: string;
+  name: string;
+  description: string;
+  category: StoreItemCategory;
+  price: number;
+  rarity: ItemRarity;
+  thumbnail_url: string;
+  glb_path: string;
+  attach_bone: string;
+  scale: [number, number, number];
+  offset: [number, number, number];
+  rotation: [number, number, number];
+  slot: string;
+  created_at: number;
+}
+
+export interface UserInventoryEntry {
+  item_id: string;
+  acquired_at: number;
+}
+
+export interface UserInventory {
+  wallet_address: string;
+  items: UserInventoryEntry[];
+}
+
+export interface EquippedItems {
+  wallet_address: string;
+  slots: Record<string, string>;
 }

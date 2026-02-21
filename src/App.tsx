@@ -26,6 +26,7 @@ import TaskMarketplace from './components/TaskMarketplace';
 import DevicePairingPanel from './components/DevicePairingPanel';
 import ToastContainer from './components/ToastContainer';
 import BottomNav from './components/BottomNav';
+import StorePanel from './components/StorePanel';
 import OnboardingOverlay, { hasSeenOnboarding } from './components/OnboardingOverlay';
 import type { Tab } from './components/BottomNav';
 
@@ -36,6 +37,7 @@ import { FEATURES } from './config/platform';
 import { useMobileWallet } from './hooks/useMobileWallet';
 import { useAppStore } from './hooks/useAppStore';
 import { useAvatarStore } from './stores/avatarStore';
+import { useStoreStore } from './stores/storeStore';
 import { getGlobalVisemeDriver } from './hooks/useVisemeDriver';
 import { getGlobalExpressionSystem } from './hooks/useExpressionSystem';
 import type { EmotionType } from './hooks/useExpressionSystem';
@@ -94,6 +96,12 @@ function App() {
 
   // Mobile Wallet Adapter (MWA) — only active on Android
   const mobileWallet = useMobileWallet();
+
+  // Store state
+  const isStoreOpen = useStoreStore((s) => s.isStoreOpen);
+  const toggleStore = useStoreStore((s) => s.toggleStore);
+  const setIsStoreOpen = useStoreStore((s) => s.setIsStoreOpen);
+  const ownedCount = useStoreStore((s) => s.ownedItemIds.size);
 
   // Camera state
   const currentCameraMode = useAvatarStore((s) => s.currentMode);
@@ -283,20 +291,27 @@ function App() {
         e.preventDefault();
         setIsDevicesOpen((prev) => !prev);
       }
+
+      // S toggles the Item Store
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        toggleStore();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleCustomize, toggleHud, toggleMarketplace]);
+  }, [toggleCustomize, toggleHud, toggleMarketplace, toggleStore]);
 
   // Mobile tab handler — sets panels directly (no toggles, avoids double-flip)
   const handleMobileTabChange = useCallback((tab: Tab) => {
     setMobileTab(tab);
     setIsCustomizeOpen(tab === 'settings');
     setIsMarketplaceOpen(tab === 'tasks');
+    setIsStoreOpen(tab === 'store');
     setIsDevicesOpen(tab === 'devices');
     setIsHudOpen(false);
-  }, [setIsCustomizeOpen, setIsMarketplaceOpen, setIsHudOpen]);
+  }, [setIsCustomizeOpen, setIsMarketplaceOpen, setIsStoreOpen, setIsHudOpen]);
 
   // ============================================================================
   // Initialization (Non-Blocking)
@@ -335,6 +350,11 @@ function App() {
       (state) => setProtocolState(state),
       () => { /* protocol state unavailable */ }
     );
+
+    // Load store catalog (non-blocking)
+    TetsuoAPI.store.listItems().then((items) => {
+      useStoreStore.getState().setItems(items);
+    });
 
     // Start polling intervals
     hudPollRef.current = setInterval(pollProtocolStateNonBlocking, HUD_POLL_INTERVAL);
@@ -422,6 +442,36 @@ function App() {
 
       {/* Custom Title Bar */}
       <TitleBar />
+
+      {/* Store Button — top-left corner */}
+      {!mobile && (
+        <motion.div
+          className="absolute z-50 left-4 top-12"
+          initial={{ opacity: 0, x: -12 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.4, delay: 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <motion.button
+            onClick={() => { hapticLight(); toggleStore(); }}
+            className={`flex items-center gap-1.5 rounded border bg-black/80 text-white/60
+              hover:border-white/40 hover:text-white transition-colors backdrop-blur-sm px-3 py-2
+              ${isStoreOpen ? 'border-neon-cyan/50 text-neon-cyan' : 'border-white/20'}`}
+            whileTap={{ scale: 0.95 }}
+            transition={{ duration: 0.1 }}
+          >
+            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+            </svg>
+            <span className="font-display uppercase tracking-wider text-xs">Store</span>
+            {ownedCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 bg-neon-cyan/20 text-neon-cyan text-[9px] font-mono rounded-full">
+                {ownedCount}
+              </span>
+            )}
+          </motion.button>
+        </motion.div>
+      )}
 
       {/* Top Bar - Camera, Appearance & Wallet Dropdowns */}
       <motion.div
@@ -523,6 +573,20 @@ function App() {
           style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 72px)' } : undefined}
         >
           <DevicePairingPanel walletAddress={wallet?.address || ''} />
+        </div>
+      )}
+
+      {/* Item Store Overlay (toggle with S on desktop, Store tab on mobile) */}
+      {isStoreOpen && (
+        <div
+          className={`absolute z-40 overflow-y-auto ${
+            mobile
+              ? 'inset-0 bottom-14 p-2 bg-black/95'
+              : 'top-12 left-4 w-[480px] max-h-[80vh]'
+          }`}
+          style={mobile ? { top: 'calc(env(safe-area-inset-top, 0px) + 72px)' } : undefined}
+        >
+          <StorePanel wallet={wallet} />
         </div>
       )}
 

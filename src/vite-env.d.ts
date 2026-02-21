@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_XAI_API_KEY: string;
   readonly VITE_SOLANA_RPC_URL: string;
   readonly VITE_SOLANA_NETWORK: string;
   readonly VITE_AGENC_PROGRAM_ID: string;

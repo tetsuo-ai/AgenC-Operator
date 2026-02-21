@@ -66,8 +66,21 @@ impl JupiterSwapExecutor {
         self.keypair = keypair;
     }
 
+    /// Maximum allowed slippage in basis points (5% = 500 bps).
+    /// Prevents accidental or malicious extreme slippage settings.
+    const MAX_SLIPPAGE_BPS: u16 = 500;
+
     /// Get a quote for a swap
     pub async fn get_quote(&self, params: &SwapParams) -> Result<SwapQuote> {
+        // SECURITY: Cap slippage to prevent accepting arbitrarily bad prices.
+        let slippage_bps = params.slippage_bps.min(Self::MAX_SLIPPAGE_BPS);
+        if params.slippage_bps > Self::MAX_SLIPPAGE_BPS {
+            warn!(
+                "Slippage {} bps exceeds max, clamped to {} bps",
+                params.slippage_bps, Self::MAX_SLIPPAGE_BPS
+            );
+        }
+
         info!(
             "Getting quote: {} {} -> {}",
             params.amount, params.input_mint, params.output_mint
@@ -79,7 +92,7 @@ impl JupiterSwapExecutor {
             params.input_mint,
             params.output_mint,
             params.amount,
-            params.slippage_bps
+            slippage_bps
         );
 
         debug!("Quote URL: {}", url);

@@ -32,6 +32,8 @@ use operator_core::{
     // Database
     DbTaskStatus, DbOperatorConfig, OperatorDb, TaskRecord, SessionState, TranscriptEntry,
     VerificationLog,
+    // Store types
+    StoreItemCategory, UserInventory, UserInventoryEntry, EquippedItems,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -103,7 +105,7 @@ impl Default for AppConfig {
             rpc_url: "https://api.devnet.solana.com".to_string(),
             network: "devnet".to_string(),
             whisper_model_path: None,
-            grok_api_key: std::env::var("VITE_XAI_API_KEY").ok(),
+            grok_api_key: std::env::var("XAI_API_KEY").ok(),
             qdrant_url: std::env::var("QDRANT_URL").ok(),
             openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
             twitter_client_id: std::env::var("TWITTER_CLIENT_ID").ok(),
@@ -497,6 +499,7 @@ async fn execute_intent(
 }
 
 /// Execute after confirmation - spawns chain tx in background
+/// SECURITY: Re-validates policy before execution to prevent bypass.
 #[tauri::command]
 async fn execute_confirmed(
     state: State<'_, AppState>,
@@ -508,6 +511,22 @@ async fn execute_confirmed(
         Ok(i) => i,
         Err(e) => return Ok(AsyncResult::err(format!("Parse error: {}", e))),
     };
+
+    // SECURITY: Re-check policy before execution to prevent bypass via direct IPC call.
+    // The original execute_intent checks policy and returns CONFIRM_REQUIRED, but a
+    // malicious caller could skip that and call execute_confirmed directly with any intent.
+    {
+        let policy = state.policy.read().await;
+        let policy_check = policy.check_policy(&intent);
+        if !policy_check.allowed {
+            return Ok(AsyncResult::ok(ExecutionResult {
+                success: false,
+                message: format!("Policy denied: {}", policy_check.reason),
+                signature: None,
+                data: None,
+            }));
+        }
+    }
 
     let executor = Arc::clone(&state.executor);
     let policy = Arc::clone(&state.policy);
@@ -548,6 +567,65 @@ async fn execute_confirmed(
 }
 
 // ============================================================================
+// File Path Security
+// ============================================================================
+
+/// Sensitive file patterns that should never be read or written by code operations.
+const SENSITIVE_FILE_PATTERNS: &[&str] = &[
+    ".env", "id.json", "keypair.json", "credentials",
+];
+const SENSITIVE_EXTENSIONS: &[&str] = &[".pem", ".key", ".p12", ".pfx", ".jks"];
+
+/// Validate a file path for code operations. Rejects paths to sensitive files
+/// and paths outside the user's home directory.
+fn validate_code_file_path(file_path: &str) -> Result<(), String> {
+    let path = std::path::Path::new(file_path);
+
+    // Canonicalize to resolve symlinks and ../ traversal
+    let canonical = path.canonicalize().map_err(|e| {
+        format!("Invalid file path '{}': {}", file_path, e)
+    })?;
+
+    // Check against sensitive file patterns
+    if let Some(file_name) = canonical.file_name().and_then(|n| n.to_str()) {
+        let lower = file_name.to_lowercase();
+        for pattern in SENSITIVE_FILE_PATTERNS {
+            if lower.contains(pattern) {
+                return Err(format!(
+                    "Access denied: '{}' matches sensitive file pattern '{}'",
+                    file_path, pattern
+                ));
+            }
+        }
+        for ext in SENSITIVE_EXTENSIONS {
+            if lower.ends_with(ext) {
+                return Err(format!(
+                    "Access denied: '{}' has sensitive extension '{}'",
+                    file_path, ext
+                ));
+            }
+        }
+    }
+
+    // Reject paths outside the user's home directory
+    #[cfg(target_os = "windows")]
+    let home = std::env::var("USERPROFILE").ok().map(std::path::PathBuf::from);
+    #[cfg(not(target_os = "windows"))]
+    let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+
+    if let Some(home_dir) = home {
+        if !canonical.starts_with(&home_dir) {
+            return Err(format!(
+                "Access denied: path '{}' is outside the home directory",
+                file_path
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+// ============================================================================
 // Intent Router Functions
 // ============================================================================
 
@@ -570,6 +648,13 @@ async fn route_code_fix(
                     data: None,
                 })),
             };
+
+            // SECURITY: Validate file path before reading
+            if let Err(e) = validate_code_file_path(&params.file_path) {
+                return Ok(AsyncResult::ok(ExecutionResult {
+                    success: false, message: e, signature: None, data: None,
+                }));
+            }
 
             // Read file content
             let code = match std::fs::read_to_string(&params.file_path) {
@@ -617,7 +702,7 @@ async fn route_code_fix(
         }
         None => Ok(AsyncResult::ok(ExecutionResult {
             success: false,
-            message: "Code executor not initialized. Set VITE_XAI_API_KEY in .env".into(),
+            message: "Code executor not initialized. Set XAI_API_KEY in .env".into(),
             signature: None,
             data: None,
         })),
@@ -642,6 +727,13 @@ async fn route_code_review(
                     data: None,
                 })),
             };
+
+            // SECURITY: Validate file path before reading
+            if let Err(e) = validate_code_file_path(&params.file_path) {
+                return Ok(AsyncResult::ok(ExecutionResult {
+                    success: false, message: e, signature: None, data: None,
+                }));
+            }
 
             let code = match std::fs::read_to_string(&params.file_path) {
                 Ok(content) => content,
@@ -756,6 +848,13 @@ async fn route_code_explain(
                     data: None,
                 })),
             };
+
+            // SECURITY: Validate file path before reading
+            if let Err(e) = validate_code_file_path(&params.file_path) {
+                return Ok(AsyncResult::ok(ExecutionResult {
+                    success: false, message: e, signature: None, data: None,
+                }));
+            }
 
             let code = match std::fs::read_to_string(&params.file_path) {
                 Ok(content) => content,
@@ -1270,7 +1369,7 @@ async fn route_image(
         }
         None => Ok(AsyncResult::ok(ExecutionResult {
             success: false,
-            message: "Image generator not configured. Set VITE_XAI_API_KEY in .env".into(),
+            message: "Image generator not configured. Set XAI_API_KEY in .env".into(),
             signature: None,
             data: None,
         })),
@@ -1322,7 +1421,7 @@ async fn route_video(
         }
         None => Ok(AsyncResult::ok(ExecutionResult {
             success: false,
-            message: "Video generator not configured. Set VITE_XAI_API_KEY in .env".into(),
+            message: "Video generator not configured. Set XAI_API_KEY in .env".into(),
             signature: None,
             data: None,
         })),
@@ -1899,12 +1998,12 @@ async fn get_voice_token() -> Result<AsyncResult<String>, String> {
     info!("[IPC] get_voice_token called");
 
     // Get API key from environment
-    let api_key = match std::env::var("VITE_XAI_API_KEY") {
+    let api_key = match std::env::var("XAI_API_KEY") {
         Ok(key) if !key.is_empty() && !key.contains("your_") => key,
         _ => {
-            error!("[IPC] VITE_XAI_API_KEY not set or invalid");
+            error!("[IPC] XAI_API_KEY not set or invalid");
             return Ok(AsyncResult::err(
-                "XAI API key not configured. Set VITE_XAI_API_KEY in .env"
+                "XAI API key not configured. Set XAI_API_KEY in .env"
             ));
         }
     };
@@ -1983,10 +2082,43 @@ async fn set_rpc_url(state: State<'_, AppState>, rpc_url: String) -> Result<(), 
     Ok(())
 }
 
-/// Get config - fast in-memory read
+/// Public config subset — secrets stripped for frontend consumption.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicAppConfig {
+    pub rpc_url: String,
+    pub network: String,
+    pub whisper_model_path: Option<String>,
+    pub qdrant_url: Option<String>,
+    pub twitter_client_id: Option<String>,
+    pub discord_default_guild_id: Option<String>,
+    pub email_from_address: Option<String>,
+    pub email_from_name: Option<String>,
+    pub github_default_owner: Option<String>,
+    pub github_default_repo: Option<String>,
+}
+
+impl From<&AppConfig> for PublicAppConfig {
+    fn from(cfg: &AppConfig) -> Self {
+        Self {
+            rpc_url: cfg.rpc_url.clone(),
+            network: cfg.network.clone(),
+            whisper_model_path: cfg.whisper_model_path.clone(),
+            qdrant_url: cfg.qdrant_url.clone(),
+            twitter_client_id: cfg.twitter_client_id.clone(),
+            discord_default_guild_id: cfg.discord_default_guild_id.clone(),
+            email_from_address: cfg.email_from_address.clone(),
+            email_from_name: cfg.email_from_name.clone(),
+            github_default_owner: cfg.github_default_owner.clone(),
+            github_default_repo: cfg.github_default_repo.clone(),
+        }
+    }
+}
+
+/// Get config - fast in-memory read, secrets stripped
 #[tauri::command]
-async fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
-    Ok(state.config.read().await.clone())
+async fn get_config(state: State<'_, AppState>) -> Result<PublicAppConfig, String> {
+    let cfg = state.config.read().await;
+    Ok(PublicAppConfig::from(&*cfg))
 }
 
 // ============================================================================
@@ -2118,6 +2250,25 @@ async fn invalidate_access_cache(
 // Tauri Commands - Memory System
 // ============================================================================
 
+/// SECURITY: Verify that the provided user_id matches the connected wallet's pubkey.
+/// Prevents any caller from reading/writing/deleting another user's memories.
+async fn verify_memory_user_id(state: &State<'_, AppState>, user_id: &str) -> Result<(), String> {
+    let executor = state.executor.read().await;
+    let wallet_pubkey = executor
+        .get_wallet_pubkey()
+        .map(|pk| pk.to_string());
+
+    match wallet_pubkey {
+        Some(ref pubkey) if pubkey == user_id => Ok(()),
+        Some(ref pubkey) => Err(format!(
+            "Access denied: user_id '{}' does not match connected wallet '{}'",
+            &user_id[..user_id.len().min(8)],
+            &pubkey[..pubkey.len().min(8)]
+        )),
+        None => Err("No wallet connected — cannot verify memory ownership".to_string()),
+    }
+}
+
 /// Get memories for a user
 #[tauri::command]
 async fn get_user_memories(
@@ -2126,6 +2277,10 @@ async fn get_user_memories(
     limit: Option<u64>,
 ) -> Result<AsyncResult<Vec<Memory>>, String> {
     debug!("[IPC] get_user_memories for {}", user_id);
+
+    if let Err(e) = verify_memory_user_id(&state, &user_id).await {
+        return Ok(AsyncResult::err(e));
+    }
 
     let memory_manager = state.memory_manager.read().await;
 
@@ -2153,6 +2308,10 @@ async fn search_memories(
 ) -> Result<AsyncResult<Vec<Memory>>, String> {
     debug!("[IPC] search_memories for {} with query: {}", user_id, query);
 
+    if let Err(e) = verify_memory_user_id(&state, &user_id).await {
+        return Ok(AsyncResult::err(e));
+    }
+
     let memory_manager = state.memory_manager.read().await;
 
     match memory_manager.as_ref() {
@@ -2179,6 +2338,10 @@ async fn store_memory(
     importance: Option<f32>,
 ) -> Result<AsyncResult<Memory>, String> {
     debug!("[IPC] store_memory for {}: {}", user_id, memory_type);
+
+    if let Err(e) = verify_memory_user_id(&state, &user_id).await {
+        return Ok(AsyncResult::err(e));
+    }
 
     let memory_manager = state.memory_manager.read().await;
 
@@ -2208,6 +2371,10 @@ async fn build_voice_context(
 ) -> Result<AsyncResult<UserContext>, String> {
     debug!("[IPC] build_voice_context for {}", user_id);
 
+    if let Err(e) = verify_memory_user_id(&state, &user_id).await {
+        return Ok(AsyncResult::err(e));
+    }
+
     let memory_manager = state.memory_manager.read().await;
     let access_gate = state.access_gate.read().await;
 
@@ -2233,6 +2400,10 @@ async fn delete_user_memories(
     user_id: String,
 ) -> Result<AsyncResult<u64>, String> {
     info!("[IPC] delete_user_memories for {}", user_id);
+
+    if let Err(e) = verify_memory_user_id(&state, &user_id).await {
+        return Ok(AsyncResult::err(e));
+    }
 
     let memory_manager = state.memory_manager.read().await;
 
@@ -2284,6 +2455,11 @@ async fn execute_code_fix(
 
     match code_executor.as_ref() {
         Some(executor) => {
+            // SECURITY: Validate file path before reading
+            if let Err(e) = validate_code_file_path(&file_path) {
+                return Ok(AsyncResult::err(e));
+            }
+
             // Read the file content
             let code = match std::fs::read_to_string(&file_path) {
                 Ok(content) => content,
@@ -2318,7 +2494,7 @@ async fn execute_code_fix(
                 Err(e) => Ok(AsyncResult::err(e.to_string())),
             }
         }
-        None => Ok(AsyncResult::err("Code executor not initialized. Set VITE_XAI_API_KEY.")),
+        None => Ok(AsyncResult::err("Code executor not initialized. Set XAI_API_KEY.")),
     }
 }
 
@@ -2329,6 +2505,11 @@ async fn execute_code_review(
     file_path: String,
 ) -> Result<AsyncResult<String>, String> {
     info!("[IPC] execute_code_review: {}", file_path);
+
+    // SECURITY: Validate file path before reading
+    if let Err(e) = validate_code_file_path(&file_path) {
+        return Ok(AsyncResult::err(e));
+    }
 
     let code_executor = state.code_executor.read().await;
 
@@ -2391,6 +2572,11 @@ async fn execute_code_explain(
     file_path: String,
 ) -> Result<AsyncResult<String>, String> {
     info!("[IPC] execute_code_explain: {}", file_path);
+
+    // SECURITY: Validate file path before reading
+    if let Err(e) = validate_code_file_path(&file_path) {
+        return Ok(AsyncResult::err(e));
+    }
 
     let code_executor = state.code_executor.read().await;
 
@@ -2905,7 +3091,7 @@ async fn generate_image(
             }
         }
         None => Ok(AsyncResult::err(
-            "Image generator not configured. Set VITE_XAI_API_KEY in .env",
+            "Image generator not configured. Set XAI_API_KEY in .env",
         )),
     }
 }
@@ -2943,7 +3129,7 @@ async fn generate_video(
             }
         }
         None => Ok(AsyncResult::err(
-            "Video generator not configured. Set VITE_XAI_API_KEY in .env",
+            "Video generator not configured. Set XAI_API_KEY in .env",
         )),
     }
 }
@@ -3112,7 +3298,7 @@ async fn init_memory_system(state: State<'_, AppState>) -> Result<AsyncResult<bo
     };
 
     // Get API key for embeddings
-    let xai_api_key = std::env::var("VITE_XAI_API_KEY").ok();
+    let xai_api_key = std::env::var("XAI_API_KEY").ok();
     let openai_api_key = {
         let config = state.config.read().await;
         config.openai_api_key.clone()
@@ -3177,8 +3363,15 @@ async fn pair_device(
     let device: DiscoveredDevice = serde_json::from_str(&device_json)
         .map_err(|e| format!("Invalid device JSON: {}", e))?;
 
+    // SECURITY: Extract keypair bytes for HMAC signing (private key as secret).
+    // Falls back to None for mobile wallet flow where keypair is external.
+    let keypair_bytes: Option<Vec<u8>> = {
+        let exec = state.executor.read().await;
+        exec.get_keypair_bytes()
+    };
+
     let executor = state.device_executor.read().await;
-    match executor.pair_device(&device, &wallet_pubkey).await {
+    match executor.pair_device(&device, &wallet_pubkey, keypair_bytes.as_deref()).await {
         Ok(result) => {
             if result.success {
                 if let Some(ref paired) = result.device {
@@ -3356,6 +3549,273 @@ fn frontend_log(level: String, message: String) {
         "warn" => info!("[Frontend] {}", message),
         "info" => info!("[Frontend] {}", message),
         _ => debug!("[Frontend] {}", message),
+    }
+}
+
+// ============================================================================
+// Store / Marketplace Commands
+// ============================================================================
+
+#[tauri::command]
+async fn list_store_items(
+    state: State<'_, AppState>,
+    category: Option<String>,
+) -> Result<AsyncResult<Vec<serde_json::Value>>, String> {
+    debug!("[IPC] list_store_items (category={:?})", category);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let cat_filter = category.as_deref().and_then(StoreItemCategory::from_str);
+
+            match db.list_items(cat_filter.as_ref()) {
+                Ok(items) => {
+                    let json_items: Vec<serde_json::Value> = items
+                        .iter()
+                        .map(|i| serde_json::to_value(i).unwrap_or_default())
+                        .collect();
+                    Ok(AsyncResult::ok(json_items))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn get_store_item(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] get_store_item (id={})", item_id);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => match db.get_item(&item_id) {
+            Ok(Some(item)) => Ok(AsyncResult::ok(serde_json::to_value(item).unwrap_or_default())),
+            Ok(None) => Ok(AsyncResult::err(format!("Item not found: {}", item_id))),
+            Err(e) => Ok(AsyncResult::err(e.to_string())),
+        },
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn buy_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    wallet_address: String,
+) -> Result<AsyncResult<bool>, String> {
+    debug!("[IPC] buy_item (id={}, wallet={})", item_id, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            // Verify item exists
+            match db.get_item(&item_id) {
+                Ok(Some(_)) => {}
+                Ok(None) => return Ok(AsyncResult::err(format!("Item not found: {}", item_id))),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            }
+
+            // Get or create inventory
+            let mut inventory = db.get_inventory(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| UserInventory {
+                    wallet_address: wallet_address.clone(),
+                    items: Vec::new(),
+                });
+
+            // Check if already owned
+            if inventory.items.iter().any(|e| e.item_id == item_id) {
+                return Ok(AsyncResult::err("Item already owned".to_string()));
+            }
+
+            // Add to inventory (UI-only purchase, no real transaction)
+            inventory.items.push(UserInventoryEntry {
+                item_id: item_id.clone(),
+                acquired_at: chrono::Utc::now().timestamp(),
+            });
+
+            match db.store_inventory(&inventory) {
+                Ok(_) => {
+                    info!("[Store] Purchased item {} for wallet {}", item_id, wallet_address);
+                    Ok(AsyncResult::ok(true))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn sell_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    wallet_address: String,
+) -> Result<AsyncResult<bool>, String> {
+    debug!("[IPC] sell_item (id={}, wallet={})", item_id, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let mut inventory = match db.get_inventory(&wallet_address) {
+                Ok(Some(inv)) => inv,
+                Ok(None) => return Ok(AsyncResult::err("No inventory found".to_string())),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            };
+
+            let before_len = inventory.items.len();
+            inventory.items.retain(|e| e.item_id != item_id);
+
+            if inventory.items.len() == before_len {
+                return Ok(AsyncResult::err("Item not in inventory".to_string()));
+            }
+
+            // Also unequip if currently equipped
+            if let Ok(Some(mut equipped)) = db.get_equipped(&wallet_address) {
+                equipped.slots.retain(|_, v| v != &item_id);
+                let _ = db.store_equipped(&equipped);
+            }
+
+            match db.store_inventory(&inventory) {
+                Ok(_) => {
+                    info!("[Store] Sold item {} from wallet {}", item_id, wallet_address);
+                    Ok(AsyncResult::ok(true))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn get_inventory(
+    state: State<'_, AppState>,
+    wallet_address: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] get_inventory (wallet={})", wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let inventory = db.get_inventory(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| UserInventory {
+                    wallet_address: wallet_address.clone(),
+                    items: Vec::new(),
+                });
+            Ok(AsyncResult::ok(serde_json::to_value(inventory).unwrap_or_default()))
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn equip_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    wallet_address: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] equip_item (id={}, wallet={})", item_id, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            // Check item exists and get its slot
+            let item = match db.get_item(&item_id) {
+                Ok(Some(item)) => item,
+                Ok(None) => return Ok(AsyncResult::err(format!("Item not found: {}", item_id))),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            };
+
+            // Check item is owned
+            let inventory = db.get_inventory(&wallet_address).unwrap_or(None);
+            let owned = inventory.as_ref()
+                .map(|inv| inv.items.iter().any(|e| e.item_id == item_id))
+                .unwrap_or(false);
+            if !owned {
+                return Ok(AsyncResult::err("Item not owned".to_string()));
+            }
+
+            // Get or create equipped state
+            let mut equipped = db.get_equipped(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| EquippedItems {
+                    wallet_address: wallet_address.clone(),
+                    slots: std::collections::HashMap::new(),
+                });
+
+            // Set slot (replaces any existing item in that slot)
+            equipped.slots.insert(item.slot.clone(), item_id.clone());
+
+            match db.store_equipped(&equipped) {
+                Ok(_) => {
+                    info!("[Store] Equipped item {} in slot {} for wallet {}", item_id, item.slot, wallet_address);
+                    Ok(AsyncResult::ok(serde_json::to_value(&equipped).unwrap_or_default()))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn unequip_item(
+    state: State<'_, AppState>,
+    slot: String,
+    wallet_address: String,
+) -> Result<AsyncResult<bool>, String> {
+    debug!("[IPC] unequip_item (slot={}, wallet={})", slot, wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let mut equipped = match db.get_equipped(&wallet_address) {
+                Ok(Some(eq)) => eq,
+                Ok(None) => return Ok(AsyncResult::err("Nothing equipped".to_string())),
+                Err(e) => return Ok(AsyncResult::err(e.to_string())),
+            };
+
+            if equipped.slots.remove(&slot).is_none() {
+                return Ok(AsyncResult::err(format!("Nothing equipped in slot: {}", slot)));
+            }
+
+            match db.store_equipped(&equipped) {
+                Ok(_) => {
+                    info!("[Store] Unequipped slot {} for wallet {}", slot, wallet_address);
+                    Ok(AsyncResult::ok(true))
+                }
+                Err(e) => Ok(AsyncResult::err(e.to_string())),
+            }
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
+    }
+}
+
+#[tauri::command]
+async fn get_equipped(
+    state: State<'_, AppState>,
+    wallet_address: String,
+) -> Result<AsyncResult<serde_json::Value>, String> {
+    debug!("[IPC] get_equipped (wallet={})", wallet_address);
+
+    let db = state.db.read().await;
+    match db.as_ref() {
+        Some(db) => {
+            let equipped = db.get_equipped(&wallet_address)
+                .unwrap_or(None)
+                .unwrap_or_else(|| EquippedItems {
+                    wallet_address: wallet_address.clone(),
+                    slots: std::collections::HashMap::new(),
+                });
+            Ok(AsyncResult::ok(serde_json::to_value(equipped).unwrap_or_default()))
+        }
+        None => Ok(AsyncResult::err("Database not initialized".to_string())),
     }
 }
 
@@ -3986,6 +4446,15 @@ pub fn run() {
             // Config
             set_rpc_url,
             get_config,
+            // Store / Marketplace
+            list_store_items,
+            get_store_item,
+            buy_item,
+            sell_item,
+            get_inventory,
+            equip_item,
+            unequip_item,
+            get_equipped,
             // Database (Phase 5)
             db_list_tasks,
             db_get_task,

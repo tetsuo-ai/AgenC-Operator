@@ -30,6 +30,9 @@ import type {
   PairedDevice,
   DeviceAgentConfig,
   DeviceCommandResult,
+  StoreItem,
+  UserInventory,
+  EquippedItems,
 } from '../types';
 
 // ============================================================================
@@ -1301,6 +1304,84 @@ export const DeviceAPI = {
   },
 };
 
+// ============================================================================
+// Store / Marketplace API
+// ============================================================================
+
+const StoreAPI = {
+  listItems(category?: string): Promise<StoreItem[]> {
+    return invoke<AsyncResult<StoreItem[]>>('list_store_items', { category: category ?? null })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] list_store_items failed:', err);
+        return [];
+      });
+  },
+
+  getItem(itemId: string): Promise<StoreItem> {
+    return invoke<AsyncResult<StoreItem>>('get_store_item', { itemId })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] get_store_item failed:', err);
+        throw new TetsuoAPIError(`Item not found: ${err}`);
+      });
+  },
+
+  buyItem(itemId: string, walletAddress: string): Promise<boolean> {
+    return invoke<AsyncResult<boolean>>('buy_item', { itemId, walletAddress })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] buy_item failed:', err);
+        throw new TetsuoAPIError(`Purchase failed: ${err}`);
+      });
+  },
+
+  sellItem(itemId: string, walletAddress: string): Promise<boolean> {
+    return invoke<AsyncResult<boolean>>('sell_item', { itemId, walletAddress })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] sell_item failed:', err);
+        throw new TetsuoAPIError(`Sale failed: ${err}`);
+      });
+  },
+
+  getInventory(walletAddress: string): Promise<UserInventory> {
+    return invoke<AsyncResult<UserInventory>>('get_inventory', { walletAddress })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] get_inventory failed:', err);
+        return { wallet_address: walletAddress, items: [] };
+      });
+  },
+
+  equipItem(itemId: string, walletAddress: string): Promise<EquippedItems> {
+    return invoke<AsyncResult<EquippedItems>>('equip_item', { itemId, walletAddress })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] equip_item failed:', err);
+        throw new TetsuoAPIError(`Equip failed: ${err}`);
+      });
+  },
+
+  unequipItem(slot: string, walletAddress: string): Promise<boolean> {
+    return invoke<AsyncResult<boolean>>('unequip_item', { slot, walletAddress })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] unequip_item failed:', err);
+        throw new TetsuoAPIError(`Unequip failed: ${err}`);
+      });
+  },
+
+  getEquipped(walletAddress: string): Promise<EquippedItems> {
+    return invoke<AsyncResult<EquippedItems>>('get_equipped', { walletAddress })
+      .then(unwrapResult)
+      .catch((err) => {
+        console.error('[API] get_equipped failed:', err);
+        return { wallet_address: walletAddress, slots: {} };
+      });
+  },
+};
+
 export const TetsuoAPI = {
   wallet: WalletAPI,
   mobileWallet: MobileWalletAPI,
@@ -1330,6 +1411,8 @@ export const TetsuoAPI = {
   database: DatabaseAPI,
   // AgenC One Devices
   device: DeviceAPI,
+  // Store / Marketplace
+  store: StoreAPI,
 };
 
 export default TetsuoAPI;
