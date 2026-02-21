@@ -102,10 +102,6 @@ interface AppState {
   isGlitching: boolean;
   setIsGlitching: (glitching: boolean) => void;
 
-  // Settings
-  grokApiKey: string | null;
-  setGrokApiKey: (key: string | null) => void;
-
   // Pending Intent (awaiting confirmation)
   pendingIntent: string | null;
   setPendingIntent: (intent: string | null) => void;
@@ -171,10 +167,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   // UI State
   isGlitching: false,
   setIsGlitching: (isGlitching) => set({ isGlitching }),
-
-  // Settings
-  grokApiKey: null,
-  setGrokApiKey: (grokApiKey) => set({ grokApiKey }),
 
   // Pending Intent
   pendingIntent: null,

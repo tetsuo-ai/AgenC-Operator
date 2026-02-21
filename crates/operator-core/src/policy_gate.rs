@@ -357,6 +357,11 @@ impl PolicyGate {
         if let Some(lamports) = params.get("lamports").and_then(|v| v.as_u64()) {
             return lamports as f64 / 1_000_000_000.0;
         }
+        // SwapParams uses "amount" in lamports — must be caught here so swap
+        // spending is properly evaluated against session limits.
+        if let Some(amount) = params.get("amount").and_then(|v| v.as_u64()) {
+            return amount as f64 / 1_000_000_000.0;
+        }
 
         0.0 // Default to 0 if no amount found
     }
@@ -399,6 +404,14 @@ impl Default for PolicyGate {
     }
 }
 
+/// Result of evaluating a verbal response for confirmation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfirmationResult {
+    Confirmed,
+    Cancelled,
+    Ambiguous,
+}
+
 /// Verbal confirmation helper
 pub struct VerbalConfirmation;
 
@@ -415,14 +428,30 @@ impl VerbalConfirmation {
 
     /// Check if response is a confirmation
     pub fn is_confirmed(response: &str) -> bool {
-        let lower = response.to_lowercase();
-        Self::CONFIRM_PHRASES.iter().any(|p| lower.contains(p))
+        // SECURITY: Use evaluate() instead for fail-safe ambiguity handling.
+        // This method is kept for backwards compatibility but callers should
+        // prefer evaluate() which checks cancellation first.
+        matches!(Self::evaluate(response), ConfirmationResult::Confirmed)
     }
 
     /// Check if response is a cancellation
     pub fn is_cancelled(response: &str) -> bool {
+        !matches!(Self::evaluate(response), ConfirmationResult::Confirmed)
+    }
+
+    /// Evaluate a verbal response with fail-safe ambiguity handling.
+    /// If the response matches both confirm and cancel phrases (e.g. "don't proceed"),
+    /// it is treated as cancelled to prevent accidental execution.
+    pub fn evaluate(response: &str) -> ConfirmationResult {
         let lower = response.to_lowercase();
-        Self::CANCEL_PHRASES.iter().any(|p| lower.contains(p))
+        let has_confirm = Self::CONFIRM_PHRASES.iter().any(|p| lower.contains(p));
+        let has_cancel = Self::CANCEL_PHRASES.iter().any(|p| lower.contains(p));
+
+        match (has_confirm, has_cancel) {
+            (_, true) => ConfirmationResult::Cancelled,   // Cancel takes priority (fail-safe)
+            (true, false) => ConfirmationResult::Confirmed,
+            (false, false) => ConfirmationResult::Ambiguous,
+        }
     }
 }
 

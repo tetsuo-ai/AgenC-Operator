@@ -114,6 +114,15 @@ impl SolanaExecutor {
             .and_then(|guard| guard.as_ref().map(|kp| kp.pubkey()))
     }
 
+    /// Get keypair bytes for device pairing HMAC authentication.
+    /// Returns None if no keypair is loaded (mobile wallet flow).
+    pub fn get_keypair_bytes(&self) -> Option<Vec<u8>> {
+        self.keypair
+            .try_read()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|kp| kp.to_bytes().to_vec()))
+    }
+
     /// Execute a voice intent after policy approval
     pub async fn execute_intent(&self, intent: &VoiceIntent) -> Result<ExecutionResult> {
         info!("Executing intent: {:?}", intent.action);

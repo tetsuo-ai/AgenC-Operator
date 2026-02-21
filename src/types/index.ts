@@ -147,17 +147,14 @@ export interface AppConfig {
   rpc_url: string;
   network: string;
   whisper_model_path?: string;
-  grok_api_key?: string;
   qdrant_url?: string;
-  openai_api_key?: string;
   // Twitter OAuth 2.0 client ID (public, for PKCE flow)
   twitter_client_id?: string;
-  // Phase 3: Discord, Email, Image config
-  discord_bot_token?: string;
   discord_default_guild_id?: string;
-  resend_api_key?: string;
   email_from_address?: string;
   email_from_name?: string;
+  github_default_owner?: string;
+  github_default_repo?: string;
 }
 
 // ============================================================================
@@ -635,7 +632,6 @@ export interface PairedDevice {
   name: string;
   ip_address: string;
   port: number;
-  shared_secret: string;
   paired_by_wallet: string;
   paired_at: number;
   last_seen: number;

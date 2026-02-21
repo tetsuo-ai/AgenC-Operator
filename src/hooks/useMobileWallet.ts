@@ -108,8 +108,8 @@ export function useMobileWallet() {
 
       // Persist auth token for session reuse
       try {
-        localStorage.setItem('mwa-auth-token', result.auth_token);
-        localStorage.setItem('mwa-address', address);
+        sessionStorage.setItem('mwa-auth-token', result.auth_token);
+        sessionStorage.setItem('mwa-address', address);
       } catch {}
     });
 
@@ -217,8 +217,8 @@ export function useMobileWallet() {
       balanceSol: 0,
     });
     try {
-      localStorage.removeItem('mwa-auth-token');
-      localStorage.removeItem('mwa-address');
+      sessionStorage.removeItem('mwa-auth-token');
+      sessionStorage.removeItem('mwa-address');
     } catch {}
   }, []);
 
