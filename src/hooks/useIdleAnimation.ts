@@ -22,6 +22,7 @@ import { log } from '../utils/log';
 import { MODEL_CONFIG } from '../config/modelConfig';
 import { BREATHING, SWAY, MICRO, BLINK } from '../config/animationConfig';
 import { FacsMorphController } from '../utils/dazMorphMap';
+import { POSE_PRESETS, type PoseName } from '../config/posePresets';
 
 // ============================================================================
 // Configuration
@@ -141,10 +142,32 @@ interface IdleAnimationState {
   microCurrent: THREE.Vector3;
   lastMicroUpdate: number;
 
-  // Weight shift
+  // Weight shift with spring momentum
   weightShiftTarget: number;   // -1 (left) to 1 (right), 0 = centered
   weightShiftCurrent: number;
+  weightShiftVelocity: number; // spring-based momentum
   nextWeightShiftTime: number;
+
+  // Deep breath variation
+  nextDeepBreathTime: number;
+  isDeepBreath: boolean;
+  deepBreathStartTime: number;
+
+  // Idle hand micro-drift
+  handDriftTargetL: THREE.Vector3;
+  handDriftCurrentL: THREE.Vector3;
+  handDriftTargetR: THREE.Vector3;
+  handDriftCurrentR: THREE.Vector3;
+  lastHandDriftUpdate: number;
+
+  // Blink request from external systems (e.g. gaze tracking)
+  externalBlinkRequested: boolean;
+
+  // Pose transition
+  activePose: string | null;
+  poseBlendProgress: number;
+  poseTransitionDuration: number;
+  poseFromBones: { [bone: string]: THREE.Euler };
 
   // Debug tracking
   debugLogTime: number;
@@ -162,6 +185,10 @@ export interface UseIdleAnimationReturn {
   reset: () => void;
   setConfig: (config: Partial<IdleAnimationConfig>) => void;
   setMorphController: (controller: FacsMorphController) => void;
+  /** Request a blink from external systems (e.g. gaze-triggered) */
+  requestBlink: () => void;
+  /** Transition to a named pose preset based on speech state */
+  transitionToPose: (poseName: PoseName) => void;
 }
 
 // ============================================================================
@@ -229,7 +256,21 @@ export function useIdleAnimation(
     lastMicroUpdate: 0,
     weightShiftTarget: 0,
     weightShiftCurrent: 0,
+    weightShiftVelocity: 0,
     nextWeightShiftTime: 5 + Math.random() * 5,
+    nextDeepBreathTime: 15 + Math.random() * 20,
+    isDeepBreath: false,
+    deepBreathStartTime: 0,
+    handDriftTargetL: new THREE.Vector3(),
+    handDriftCurrentL: new THREE.Vector3(),
+    handDriftTargetR: new THREE.Vector3(),
+    handDriftCurrentR: new THREE.Vector3(),
+    lastHandDriftUpdate: 0,
+    externalBlinkRequested: false,
+    activePose: null,
+    poseBlendProgress: 1.0,
+    poseTransitionDuration: 0.8,
+    poseFromBones: {},
     debugLogTime: 0,
     blinkCount: 0,
   });
@@ -378,11 +419,32 @@ export function useIdleAnimation(
     const t = state.time;
 
     // ========================================
-    // Breathing Animation
+    // Breathing Animation (with deep breath variation + dynamic rate)
     // ========================================
-    // Smooth sinusoidal cycle — easeInOutSine-like due to sine's natural zero-velocity peaks
-    const breathCycle = Math.sin(t * cfg.breathSpeed * Math.PI * 2);
-    const breathIn = (breathCycle + 1) * 0.5; // 0-1 range
+    const speaking = !!isSpeaking;
+
+    // Dynamic breathing rate: faster during speech
+    const dynamicBreathSpeed = speaking ? cfg.breathSpeed * 1.3 : cfg.breathSpeed;
+
+    // Deep breath trigger: every 15-35s, 3-second deep breath at 1.8x amplitude
+    let deepBreathMultiplier = 1.0;
+    if (t >= state.nextDeepBreathTime && !state.isDeepBreath) {
+      state.isDeepBreath = true;
+      state.deepBreathStartTime = t;
+    }
+    if (state.isDeepBreath) {
+      const deepProgress = (t - state.deepBreathStartTime) / 3.0; // 3-second duration
+      if (deepProgress >= 1) {
+        state.isDeepBreath = false;
+        state.nextDeepBreathTime = t + 15 + Math.random() * 20; // 15-35s until next
+      } else {
+        // Sine envelope for smooth deep breath
+        deepBreathMultiplier = 1.0 + 0.8 * Math.sin(deepProgress * Math.PI); // peaks at 1.8x
+      }
+    }
+
+    const breathCycle = Math.sin(t * dynamicBreathSpeed * Math.PI * 2);
+    const breathIn = (breathCycle + 1) * 0.5 * deepBreathMultiplier; // 0-1 range (up to 1.8x during deep breath)
 
     if (bones.spine && rest.spine) {
       bones.spine.rotation.x = rest.spine.x - breathIn * cfg.breathSpineAmount;
@@ -441,8 +503,11 @@ export function useIdleAnimation(
       state.nextWeightShiftTime = t + 6 + Math.random() * 8; // 6-14s between shifts
     }
 
-    // Smooth approach to weight target
-    state.weightShiftCurrent += (state.weightShiftTarget - state.weightShiftCurrent) * 0.008;
+    // Spring-based weight shift momentum
+    const weightForce = (state.weightShiftTarget - state.weightShiftCurrent) * 0.02;
+    state.weightShiftVelocity += weightForce;
+    state.weightShiftVelocity *= 0.95; // dampen at 0.95/frame
+    state.weightShiftCurrent += state.weightShiftVelocity;
     const ws = state.weightShiftCurrent;
 
     // Apply weight shift to hips and thighs
@@ -459,15 +524,42 @@ export function useIdleAnimation(
     }
 
     // ========================================
-    // Arm Animation DISABLED
+    // Idle Hand Micro-Drift (subtle wrist movements when not speaking)
     // ========================================
-    // IMPORTANT: Arm rotations are now controlled by useGenesisAnimation's idle pose
-    // and useTalkingAnimation's gestures. Do NOT touch arm bones here or it will
-    // overwrite the idle pose and put arms back in T-pose.
-    //
-    // TODO: Re-enable subtle arm drift once we have a shared rest pose system
-    // that captures poses AFTER useGenesisAnimation applies idle corrections.
-    // ========================================
+    // Very subtle wrist micro-movements (0.015 rad max, lerp rate 0.02).
+    // Only active when !isSpeaking. Rest poses captured AFTER useGenesisAnimation's corrections.
+    if (!speaking) {
+      // Update drift targets periodically
+      if (t - state.lastHandDriftUpdate > 2 + Math.random() * 3) {
+        const maxDrift = 0.015;
+        state.handDriftTargetL.set(
+          (Math.random() - 0.5) * 2 * maxDrift,
+          (Math.random() - 0.5) * 2 * maxDrift,
+          (Math.random() - 0.5) * 2 * maxDrift
+        );
+        state.handDriftTargetR.set(
+          (Math.random() - 0.5) * 2 * maxDrift,
+          (Math.random() - 0.5) * 2 * maxDrift,
+          (Math.random() - 0.5) * 2 * maxDrift
+        );
+        state.lastHandDriftUpdate = t;
+      }
+
+      // Smooth lerp toward drift target
+      state.handDriftCurrentL.lerp(state.handDriftTargetL, 0.02);
+      state.handDriftCurrentR.lerp(state.handDriftTargetR, 0.02);
+
+      if (bones.handL && rest.handL) {
+        bones.handL.rotation.x = rest.handL.x + state.handDriftCurrentL.x;
+        bones.handL.rotation.y = rest.handL.y + state.handDriftCurrentL.y;
+        bones.handL.rotation.z = rest.handL.z + state.handDriftCurrentL.z;
+      }
+      if (bones.handR && rest.handR) {
+        bones.handR.rotation.x = rest.handR.x + state.handDriftCurrentR.x;
+        bones.handR.rotation.y = rest.handR.y + state.handDriftCurrentR.y;
+        bones.handR.rotation.z = rest.handR.z + state.handDriftCurrentR.z;
+      }
+    }
 
     // ========================================
     // Head Sway + Micro-Movements
@@ -514,8 +606,6 @@ export function useIdleAnimation(
     // Speech-aware: blink less during active speech, more at phrase boundaries.
     // People naturally suppress blinks mid-sentence and blink at pauses/transitions.
 
-    const speaking = !!isSpeaking;
-
     // Detect speech→pause transition: queue a blink soon (phrase boundary effect)
     if (state.wasSpeaking && !speaking && !state.isBlinking) {
       const boundaryDelay = 0.2 + Math.random() * 0.5; // 200-700ms after speech stops
@@ -525,7 +615,11 @@ export function useIdleAnimation(
     }
     state.wasSpeaking = speaking;
 
-    // Check if it's time to blink
+    // Check if it's time to blink (or external blink requested)
+    if (!state.isBlinking && state.externalBlinkRequested) {
+      state.externalBlinkRequested = false;
+      state.nextBlinkTime = t; // trigger immediately
+    }
     if (!state.isBlinking && t >= state.nextBlinkTime) {
       state.isBlinking = true;
       state.blinkStartTime = t;
@@ -609,6 +703,37 @@ export function useIdleAnimation(
     }
 
     // ========================================
+    // Pose Transition Engine (Phase 6.2)
+    // ========================================
+    // When a pose transition is active, blend bone positions toward target pose
+    if (state.activePose && state.poseBlendProgress < 1.0) {
+      state.poseBlendProgress = Math.min(1.0, state.poseBlendProgress + delta / state.poseTransitionDuration);
+      // Smoothstep easing
+      const p = state.poseBlendProgress;
+      const smoothP = p * p * (3 - 2 * p);
+
+      const preset = POSE_PRESETS[state.activePose as PoseName];
+      if (preset) {
+        for (const [boneName, offset] of Object.entries(preset.bones)) {
+          const bone = bones[boneName as keyof BoneRefs];
+          const restPose = rest[boneName];
+          if (bone && restPose && offset) {
+            const targetX = restPose.x + (offset.x ?? 0);
+            const targetY = restPose.y + (offset.y ?? 0);
+            const targetZ = restPose.z + (offset.z ?? 0);
+
+            const fromPose = state.poseFromBones[boneName];
+            if (fromPose) {
+              bone.rotation.x = fromPose.x + (targetX - fromPose.x) * smoothP;
+              bone.rotation.y = fromPose.y + (targetY - fromPose.y) * smoothP;
+              bone.rotation.z = fromPose.z + (targetZ - fromPose.z) * smoothP;
+            }
+          }
+        }
+      }
+    }
+
+    // ========================================
     // Periodic Debug Logging (every 10 seconds)
     // ========================================
     if (t - state.debugLogTime >= 10.0) {
@@ -660,7 +785,21 @@ export function useIdleAnimation(
       lastMicroUpdate: 0,
       weightShiftTarget: 0,
       weightShiftCurrent: 0,
+      weightShiftVelocity: 0,
       nextWeightShiftTime: 5 + Math.random() * 5,
+      nextDeepBreathTime: 15 + Math.random() * 20,
+      isDeepBreath: false,
+      deepBreathStartTime: 0,
+      handDriftTargetL: new THREE.Vector3(),
+      handDriftCurrentL: new THREE.Vector3(),
+      handDriftTargetR: new THREE.Vector3(),
+      handDriftCurrentR: new THREE.Vector3(),
+      lastHandDriftUpdate: 0,
+      externalBlinkRequested: false,
+      activePose: null,
+      poseBlendProgress: 1.0,
+      poseTransitionDuration: 0.8,
+      poseFromBones: {},
       debugLogTime: 0,
       blinkCount: 0,
     };
@@ -681,6 +820,33 @@ export function useIdleAnimation(
     log.info(`[IdleAnimation] FACS morph controller set (${controller.morphCount} morphs, blink=${hasBlink ? 'yes' : 'no'})`);
   }, []);
 
+  // Request a blink from external systems (e.g. gaze-triggered saccade blinks)
+  const requestBlink = useCallback(() => {
+    stateRef.current.externalBlinkRequested = true;
+  }, []);
+
+  // Transition to a named pose preset
+  const transitionToPose = useCallback((poseName: PoseName) => {
+    const state = stateRef.current;
+    const bones = bonesRef.current;
+    const preset = POSE_PRESETS[poseName];
+    if (!preset) return;
+
+    // Snapshot current bone positions as blend-from
+    state.poseFromBones = {};
+    for (const boneName of Object.keys(preset.bones)) {
+      const bone = bones[boneName as keyof BoneRefs];
+      if (bone) {
+        state.poseFromBones[boneName] = bone.rotation.clone();
+      }
+    }
+
+    state.activePose = poseName;
+    state.poseBlendProgress = 0;
+    state.poseTransitionDuration = preset.transitionDuration;
+    log.info(`[IdleAnimation] Pose transition → ${poseName} (${preset.transitionDuration}s)`);
+  }, []);
+
   return {
     initialize,
     update,
@@ -688,5 +854,7 @@ export function useIdleAnimation(
     reset,
     setConfig,
     setMorphController,
+    requestBlink,
+    transitionToPose,
   };
 }

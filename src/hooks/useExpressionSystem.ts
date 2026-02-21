@@ -162,7 +162,7 @@ interface ExpressionState {
   speechEyeWidenCurrent: number;
   // Micro-expressions during idle
   nextMicroExprTime: number;
-  microExprType: 'brow_twitch' | 'lip_press' | 'none';
+  microExprType: 'brow_twitch' | 'lip_press' | 'nose_scrunch' | 'none';
   microExprStart: number;
   microExprDuration: number;
   // Nostril flare
@@ -268,7 +268,7 @@ export function useExpressionSystem(
     speechSmileCurrent: 0,
     speechEyeWidenTarget: 0,
     speechEyeWidenCurrent: 0,
-    nextMicroExprTime: Math.random() * 15 + 8,
+    nextMicroExprTime: Math.random() * 8 + 4,
     microExprType: 'none',
     microExprStart: 0,
     microExprDuration: 0,
@@ -528,8 +528,10 @@ export function useExpressionSystem(
     // ========================================
     let microBrowTwitch = 0;
     let microLipPress = 0;
+    let microNoseScrunch = 0;
     if (!isSpeaking && t >= state.nextMicroExprTime && state.microExprType === 'none') {
-      state.microExprType = Math.random() > 0.5 ? 'brow_twitch' : 'lip_press';
+      const r = Math.random();
+      state.microExprType = r < 0.4 ? 'brow_twitch' : r < 0.7 ? 'lip_press' : 'nose_scrunch';
       state.microExprStart = t;
       state.microExprDuration = 0.3 + Math.random() * 0.5;
     }
@@ -538,13 +540,15 @@ export function useExpressionSystem(
       const mProgress = (t - state.microExprStart) / state.microExprDuration;
       if (mProgress >= 1) {
         state.microExprType = 'none';
-        state.nextMicroExprTime = t + 8 + Math.random() * 20;
+        state.nextMicroExprTime = t + 4 + Math.random() * 8; // 4-12s interval
       } else {
         const mCurve = Math.sin(mProgress * Math.PI);
         if (state.microExprType === 'brow_twitch') {
           microBrowTwitch = mCurve * 0.08;
         } else if (state.microExprType === 'lip_press') {
           microLipPress = mCurve * 0.02;
+        } else if (state.microExprType === 'nose_scrunch') {
+          microNoseScrunch = mCurve * 0.04;
         }
       }
     }
@@ -618,8 +622,8 @@ export function useExpressionSystem(
     // Combine speech-reactive brow with triggered expressions + emotion
     browRaiseAmount = Math.min(config.browEmphasisAmount * 1.5, browRaiseAmount + state.speechBrowCurrent);
 
-    // Combine nostril flare sources
-    const totalNostrilFlare = state.nostrilFlareCurrent + expressionNostrilFlare;
+    // Combine nostril flare sources + micro nose scrunch
+    const totalNostrilFlare = state.nostrilFlareCurrent + expressionNostrilFlare + microNoseScrunch;
 
     // Total smile: random smiles + triggered expression boosts + emotion + speech micro-smile
     const totalSmile = Math.min(1, state.smileIntensityCurrent + expressionSmileBoost + state.speechSmileCurrent);
@@ -670,6 +674,10 @@ export function useExpressionSystem(
         morphCtrl.setMorph('browInnerUpLeft', Math.min(0.15, eyeWidenAmount * 0.5));
         morphCtrl.setMorph('browInnerUpRight', Math.min(0.15, eyeWidenAmount * 0.5));
       }
+
+      // Nose scrunch micro-expression — applied via nostril bones (no nose morphs available)
+      // The morph controller doesn't have nose wrinkler morphs, so this is handled
+      // by the totalNostrilFlare bone application below
     }
 
     // Apply legacy morph targets (if available and no FACS controller)

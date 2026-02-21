@@ -30,7 +30,7 @@ export interface PosePreset {
   transitionDuration: number;
 }
 
-export type PoseName = 'idle' | 'thinking' | 'excited' | 'attentive';
+export type PoseName = 'idle' | 'thinking' | 'excited' | 'attentive' | 'listening' | 'speaking' | 'thinkingDeep';
 
 // ============================================================================
 // Presets
@@ -50,17 +50,15 @@ export const POSE_PRESETS: Record<PoseName, PosePreset> = {
       shoulderR:  { x: 0.02, z: 0.015 },            // right shoulder slightly back
       // Upper arms: ABSOLUTE rotations for full control
       // X: -PI/2 (-1.57) = straight down from shoulder
-      // Y: controls arm twist (palms inward vs forward) - original was ~0.814/-0.814
-      upperArmL:  { x: -1.45, y: 1.96, z: 0, absolute: true },   // slightly outward from down + 112° twist
-      upperArmR:  { x: 1.45, y: -1.96, z: 0, absolute: true },  // slightly outward from down + 112° twist (mirrored)
-      // Forearm: ABSOLUTE rotations to override complex base pose
-      // Base pose has foreArmL: (-2.480, 1.461, 2.590), foreArmR: (2.480, -1.461, 2.590)
-      // Set to near-zero with slight bend for natural hang - adjust based on hand Y position
-      foreArmL:   { x: 0, y: 0, z: 0, absolute: true },  // TEST: zero out, check hand Y
-      foreArmR:   { x: 0, y: 0, z: 0, absolute: true },  // TEST: zero out, check hand Y
-      // Hands: palms facing inward toward thighs
-      handL:      { x: -0.05, z: 0.02 },            // slight wrist flex, palm inward
-      handR:      { x: -0.05, z: -0.02 },           // mirrored: same flex, palm inward
+      // Y: controls arm twist (palms inward vs forward) — 0.90 ≈ 52° for natural palms-inward
+      upperArmL:  { x: -1.50, y: 0.90, z: 0.05, absolute: true },   // reduced Y-twist from 112° to 52°
+      upperArmR:  { x: 1.50, y: -0.90, z: -0.05, absolute: true },  // mirrored
+      // Forearm: ABSOLUTE rotations — slight elbow flex + pronation
+      foreArmL:   { x: -0.15, y: 0.20, z: 0.10, absolute: true },   // ~8.5° elbow flex + slight pronation
+      foreArmR:   { x: 0.15, y: -0.20, z: 0.10, absolute: true },   // mirrored
+      // Hands: adjusted for new arm orientation
+      handL:      { x: -0.08, y: 0.05, z: 0.04 },   // wrist flex adjusted for new arm twist
+      handR:      { x: -0.08, y: -0.05, z: -0.04 },  // mirrored
       neck1:      { x: 0.015, z: 0.015 },           // slight forward + tilt
       head:       { x: 0.025, z: 0.025 },           // head slightly forward and tilted
     },
@@ -105,5 +103,47 @@ export const POSE_PRESETS: Record<PoseName, PosePreset> = {
       spine4: { x: 0.01 },                 // subtle lean forward
     },
     transitionDuration: 0.8,
+  },
+
+  /** Slight forward lean, chin down — receptive body language */
+  listening: {
+    name: 'listening',
+    bones: {
+      head:   { x: 0.05, z: 0.02 },        // chin down + slight tilt
+      neck1:  { x: 0.03 },                  // neck follows
+      spine3: { x: 0.02 },                  // forward lean
+      spine4: { x: 0.015 },                 // chest follows
+      shoulderL: { z: -0.02 },              // shoulders slightly forward
+      shoulderR: { z: 0.02 },
+    },
+    transitionDuration: 1.0,
+  },
+
+  /** Straightened posture, chin up — confident/active */
+  speaking: {
+    name: 'speaking',
+    bones: {
+      head:   { x: -0.02 },                 // chin slightly up
+      neck1:  { x: -0.015 },                // neck straightened
+      spine3: { x: -0.02 },                 // upper back straightened
+      spine4: { x: -0.025 },                // chest lift
+      shoulderL: { z: 0.02 },               // shoulders back
+      shoulderR: { z: -0.02 },
+    },
+    transitionDuration: 0.8,
+  },
+
+  /** Slumped posture, head tilted — deep contemplation */
+  thinkingDeep: {
+    name: 'thinkingDeep',
+    bones: {
+      head:   { x: 0.06, z: -0.04 },       // chin down, tilted right
+      neck1:  { x: 0.04, z: -0.02 },        // neck follows
+      spine3: { x: 0.03 },                  // slight slump
+      spine4: { x: 0.02 },                  // chest droop
+      shoulderL: { z: -0.03 },              // shoulders forward
+      shoulderR: { z: 0.02 },               // slight asymmetry
+    },
+    transitionDuration: 1.2,
   },
 };

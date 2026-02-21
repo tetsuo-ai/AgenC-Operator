@@ -77,6 +77,13 @@ interface GazeRestPoses {
   [boneName: string]: THREE.Euler;
 }
 
+/** Focus point for multi-point attention wander system */
+interface FocusPoint {
+  yaw: number;
+  pitch: number;
+  holdDuration: number; // how long to gaze at this point (2-4s)
+}
+
 interface GazeState {
   mode: GazeMode;
   // Normalized cursor position (-1 to 1)
@@ -95,10 +102,15 @@ interface GazeState {
   saccadeOffsetX: number;
   saccadeOffsetY: number;
   nextSaccadeTime: number;
-  // Wander state
+  // Wander state (multi-point attention system)
+  wanderFocusPoints: FocusPoint[];
+  wanderCurrentIndex: number;
+  wanderPointStartTime: number;
   wanderTargetYaw: number;
   wanderTargetPitch: number;
   nextWanderTime: number;
+  // Blink request callback (set externally by idle animation)
+  onBlinkRequest: (() => void) | null;
   // Time accumulator
   time: number;
   // Debug
@@ -116,6 +128,8 @@ export interface UseGazeTrackingReturn {
   setCursorPosition: (x: number, y: number) => void;
   /** Get current mode */
   getMode: () => GazeMode;
+  /** Set a callback to request blinks (e.g. from useIdleAnimation.requestBlink) */
+  setBlinkCallback: (cb: () => void) => void;
 }
 
 // ============================================================================
@@ -155,9 +169,13 @@ export function useGazeTracking(
     saccadeOffsetX: 0,
     saccadeOffsetY: 0,
     nextSaccadeTime: Math.random() * 1 + 0.5,
+    wanderFocusPoints: [],
+    wanderCurrentIndex: 0,
+    wanderPointStartTime: 0,
     wanderTargetYaw: 0,
     wanderTargetPitch: 0,
     nextWanderTime: Math.random() * 3 + 2,
+    onBlinkRequest: null,
     time: 0,
     debugTimer: 0,
   });
@@ -270,16 +288,49 @@ export function useGazeTracking(
         state.targetPitch = 0;
         break;
 
-      case 'wander':
-        // Slow random drift
-        if (state.time >= state.nextWanderTime) {
-          state.wanderTargetYaw = (Math.random() - 0.5) * config.maxHeadYaw * 0.4;
-          state.wanderTargetPitch = (Math.random() - 0.5) * config.maxHeadPitch * 0.3;
-          state.nextWanderTime = state.time + 3 + Math.random() * 5;
+      case 'wander': {
+        // Multi-point attention system: generate 3-5 focus points, hold each 2-4s
+        if (state.wanderFocusPoints.length === 0) {
+          // Generate initial focus points
+          const count = 3 + Math.floor(Math.random() * 3); // 3-5 points
+          state.wanderFocusPoints = [];
+          for (let i = 0; i < count; i++) {
+            state.wanderFocusPoints.push({
+              yaw: (Math.random() - 0.5) * config.maxHeadYaw * 0.5,
+              pitch: (Math.random() - 0.5) * config.maxHeadPitch * 0.4,
+              holdDuration: 2 + Math.random() * 2, // 2-4s
+            });
+          }
+          state.wanderCurrentIndex = 0;
+          state.wanderPointStartTime = state.time;
         }
+
+        const currentPoint = state.wanderFocusPoints[state.wanderCurrentIndex];
+        if (currentPoint) {
+          state.wanderTargetYaw = currentPoint.yaw;
+          state.wanderTargetPitch = currentPoint.pitch;
+
+          // Check if hold time exceeded — advance to next point
+          if (state.time - state.wanderPointStartTime > currentPoint.holdDuration) {
+            state.wanderCurrentIndex = (state.wanderCurrentIndex + 1) % state.wanderFocusPoints.length;
+            state.wanderPointStartTime = state.time;
+
+            // Gaze-triggered blinks: 40% chance to blink on focus point shift
+            if (state.onBlinkRequest && Math.random() < 0.4) {
+              state.onBlinkRequest();
+            }
+
+            // Occasionally regenerate points (20% chance per cycle completion)
+            if (state.wanderCurrentIndex === 0 && Math.random() < 0.2) {
+              state.wanderFocusPoints = []; // will regenerate next frame
+            }
+          }
+        }
+
         state.targetYaw = state.wanderTargetYaw;
         state.targetPitch = state.wanderTargetPitch;
         break;
+      }
     }
 
     // ==============================
@@ -408,11 +459,17 @@ export function useGazeTracking(
     }
   }, []);
 
+  // Set a callback to request blinks on gaze shifts (connects to useIdleAnimation.requestBlink)
+  const setBlinkCallback = useCallback((cb: () => void) => {
+    stateRef.current.onBlinkRequest = cb;
+  }, []);
+
   return {
     initialize,
     update,
     setMode,
     setCursorPosition,
     getMode,
+    setBlinkCallback,
   };
 }
