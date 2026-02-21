@@ -202,16 +202,19 @@ export function useVisemeDriver(): UseVisemeDriverReturn {
       state.currentId = currentPhoneme.viseme;
 
       if (nextPhoneme) {
-        // Blend toward next phoneme near the end of current
         const timeInPhoneme = t - currentPhoneme.startTime;
         const blendStart = currentPhoneme.duration - VISEME_TRANSITION_TIME;
 
         if (timeInPhoneme > blendStart) {
+          // Transition phase: blend toward next phoneme
           const blendT = (timeInPhoneme - blendStart) / VISEME_TRANSITION_TIME;
           const nextShape = VISEME_SHAPES[nextPhoneme.viseme];
           state.currentWeights = blendVisemes(currentShape, nextShape, blendT);
         } else {
-          state.currentWeights = { ...currentShape };
+          // Hold phase: coarticulation lookahead — blend 25% toward next viseme
+          // This prevents the "locked shape" look during holds
+          const nextShape = VISEME_SHAPES[nextPhoneme.viseme];
+          state.currentWeights = blendVisemes(currentShape, nextShape, 0.25);
         }
       } else {
         state.currentWeights = { ...currentShape };

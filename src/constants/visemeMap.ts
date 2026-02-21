@@ -148,11 +148,30 @@ export const GRAPHEME_TO_VISEME: Array<[RegExp, VisemeId]> = [
 // Phoneme Timing Constants
 // ============================================================================
 
-/** Average duration per phoneme in seconds */
+/** Average duration per phoneme in seconds (fallback) */
 export const PHONEME_DURATION = 0.08;
 
+/** Per-viseme durations: vowels longer, stops shorter, fricatives mid */
+export const VISEME_DURATIONS: Record<VisemeId, number> = {
+  sil: 0.06,
+  PP:  0.06,   // stops — quick closure
+  FF:  0.07,   // fricatives
+  TH:  0.08,   // fricatives (dental)
+  DD:  0.06,   // stops
+  kk:  0.06,   // stops
+  CH:  0.07,   // affricates
+  SS:  0.07,   // fricatives
+  nn:  0.07,   // nasals
+  RR:  0.08,   // approximants
+  aa:  0.11,   // open vowel — longest
+  E:   0.10,   // mid vowel
+  ih:  0.10,   // close vowel
+  oh:  0.11,   // rounded vowel
+  ou:  0.10,   // rounded close vowel
+};
+
 /** Transition time between visemes in seconds */
-export const VISEME_TRANSITION_TIME = 0.05;
+export const VISEME_TRANSITION_TIME = 0.08;
 
 /** Duration to hold silence viseme after last phoneme */
 export const SILENCE_HOLD_TIME = 0.15;
@@ -196,7 +215,7 @@ export function textToPhonemes(text: string): PhonemeEntry[] {
     for (const [pattern, viseme] of GRAPHEME_TO_VISEME) {
       const match = remaining.match(pattern);
       if (match) {
-        phonemes.push({ viseme, duration: PHONEME_DURATION });
+        phonemes.push({ viseme, duration: VISEME_DURATIONS[viseme] ?? PHONEME_DURATION });
         i += match[0].length;
         matched = true;
         break;

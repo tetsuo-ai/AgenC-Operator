@@ -62,7 +62,7 @@ const DEFAULT_CONFIG: MouthAnimationConfig = {
   debug: false,
   forceTest: -1, // Set to 0.9 to test if rig works
   useJawBone: true, // Use jaw bone for additional realism
-  jawBoneContribution: 1.0, // Full jaw bone — morph targets may be on non-face mesh
+  jawBoneContribution: 0.3, // Reduced — morphs handle most jaw shaping, bone adds subtle reinforcement
 };
 
 // ============================================================================
@@ -389,8 +389,9 @@ export function useMouthAnimation(
 
     if (viseme && morphCtrl) {
       // === FACS MORPH VISEME MODE: Drive morphs directly from viseme weights ===
-      // Intensity scales with audio amplitude — capped for natural, subtle speech
-      const intensity = Math.max(0.1, finalMouth * 0.8);
+      // Intensity scales with audio amplitude — higher base + velocity emphasis boost
+      const velocityBoost = Math.min(0.3, velocity * 30); // rapid mouth opening adds up to +0.3
+      const intensity = Math.min(1.0, Math.max(0.15, finalMouth * 1.2) + velocityBoost);
 
       // --- Core mouth shapes ---
 
@@ -440,9 +441,9 @@ export function useMouthAnimation(
       morphCtrl.setSymmetric('browInnerUp', browLift);
       morphCtrl.setSymmetric('browOuterUp', browLift * 0.5);
 
-      // Jaw bone contribution
+      // Jaw bone contribution (scaled by jawBoneContribution to avoid double-dipping with morphs)
       if (jawBoneRef.current && jawRestRotationRef.current) {
-        const jawAmount = viseme.jawOpen * intensity * cfg.maxJawRotation * cfg.jawRotationDirection;
+        const jawAmount = viseme.jawOpen * intensity * cfg.maxJawRotation * cfg.jawRotationDirection * cfg.jawBoneContribution;
         const bone = jawBoneRef.current.bone;
         const rest = jawRestRotationRef.current;
         switch (cfg.jawRotationAxis) {
@@ -457,7 +458,7 @@ export function useMouthAnimation(
       // Upper lips (rest x≈-1.58, z≈3.14): -Y opens upward (flipped 180°)
       if (Object.keys(lips).length > 0) {
         // Lower lip: +Y to drop open, proportional to jawOpen + lipLowerDrop
-        const lowerOpen = (viseme.lipLowerDrop + viseme.jawOpen * 0.5) * intensity * 0.20;
+        const lowerOpen = (viseme.lipLowerDrop + viseme.jawOpen * 0.5) * intensity * 0.30;
         if (lips.centerLower && lipRest.centerLower) {
           lips.centerLower.rotation.y = lipRest.centerLower.y + lowerOpen;
         }
@@ -469,7 +470,7 @@ export function useMouthAnimation(
         }
 
         // Upper lip: -Y to raise open, proportional to lipUpperRaise + jawOpen
-        const upperOpen = (viseme.lipUpperRaise + viseme.jawOpen * 0.3) * intensity * 0.15;
+        const upperOpen = (viseme.lipUpperRaise + viseme.jawOpen * 0.3) * intensity * 0.22;
         if (lips.centerUpper && lipRest.centerUpper) {
           lips.centerUpper.rotation.y = lipRest.centerUpper.y - upperOpen;
         }
@@ -481,8 +482,8 @@ export function useMouthAnimation(
         }
 
         // Corners: Y for spread, X for pucker
-        const stretchAmount = viseme.lipStretch * intensity * 0.15;
-        const puckerAmount = viseme.lipPucker * intensity * 0.12;
+        const stretchAmount = viseme.lipStretch * intensity * 0.20;
+        const puckerAmount = viseme.lipPucker * intensity * 0.18;
         if (lips.cornerL && lipRest.cornerL) {
           lips.cornerL.rotation.y = lipRest.cornerL.y + stretchAmount;
           lips.cornerL.rotation.x = lipRest.cornerL.x + puckerAmount;
@@ -513,7 +514,7 @@ export function useMouthAnimation(
         }
 
         // Lower lip: +Y to drop open
-        const lowerOpen = (viseme.lipLowerDrop + viseme.jawOpen * 0.5) * intensity * 0.20;
+        const lowerOpen = (viseme.lipLowerDrop + viseme.jawOpen * 0.5) * intensity * 0.30;
         if (lips.centerLower && lipRest.centerLower) {
           lips.centerLower.rotation.y = lipRest.centerLower.y + lowerOpen;
         }
@@ -525,7 +526,7 @@ export function useMouthAnimation(
         }
 
         // Upper lip: -Y to raise open
-        const upperOpen = (viseme.lipUpperRaise + viseme.jawOpen * 0.3) * intensity * 0.15;
+        const upperOpen = (viseme.lipUpperRaise + viseme.jawOpen * 0.3) * intensity * 0.22;
         if (lips.centerUpper && lipRest.centerUpper) {
           lips.centerUpper.rotation.y = lipRest.centerUpper.y - upperOpen;
         }
@@ -537,8 +538,8 @@ export function useMouthAnimation(
         }
 
         // Corners: Y for spread, X for pucker
-        const stretchAmount = viseme.lipStretch * intensity * 0.15;
-        const puckerAmount = viseme.lipPucker * intensity * 0.12;
+        const stretchAmount = viseme.lipStretch * intensity * 0.20;
+        const puckerAmount = viseme.lipPucker * intensity * 0.18;
         if (lips.cornerL && lipRest.cornerL) {
           lips.cornerL.rotation.y = lipRest.cornerL.y + stretchAmount;
           lips.cornerL.rotation.x = lipRest.cornerL.x + puckerAmount;
